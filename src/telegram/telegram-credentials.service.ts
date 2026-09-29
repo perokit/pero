@@ -1,5 +1,11 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import {
+  ensureGitignoreLine,
+  EnvFilePermissionError,
+  readEnvFile,
+  setEnvValue,
+} from '../config/env-file.js';
+import {
   deleteSecret,
   readSecret,
   writeSecret,
@@ -18,8 +24,12 @@ export const TELEGRAM_OPTIONS = Symbol('TELEGRAM_OPTIONS');
 export const TELEGRAM_TOKEN_SECRET = 'telegram-bot-token';
 
 export interface TelegramOptions {
-  /** The data directory's owner-only `secrets/`. */
+  /** A legacy data directory's owner-only `secrets/`; unused with `envFile`. */
   secretsDir: string;
+  /** A workspace's `.env`, which holds the token instead of `secrets/`. */
+  envFile?: string | null;
+  /** The workspace's `.gitignore`, made to list `.env` when it is written. */
+  gitignore?: string | null;
   /** The daemon's environment, which may carry the token. */
   env: NodeJS.ProcessEnv;
   /** The Bot API server; Telegram's own unless set. */
@@ -28,7 +38,8 @@ export interface TelegramOptions {
 
 /**
  * The Telegram bot token: from the environment when it is set there,
- * otherwise from `secrets/`. Never logged and never sent to the CLI. It
+ * otherwise from the workspace's `.env`, or from `secrets/` in a legacy data
+ * directory. Never logged and never sent to the CLI. It
  * reports the Telegram component while there is no valid token; with one,
  * it reports connecting until the adapter says how the connection stands.
  */
@@ -72,17 +83,25 @@ export class TelegramCredentials implements OnModuleInit {
    * use at once. A token in the environment still wins over the stored one.
    */
   set(token: string | null): void {
-    if (token === null) {
-      deleteSecret(this.options.secretsDir, TELEGRAM_TOKEN_SECRET);
-      this.logger.log('Stored bot token removed');
+    const value = token === null ? null : telegramBotTokenSchema.parse(token);
+    const { envFile, gitignore, secretsDir } = this.options;
+    if (envFile) {
+      setEnvValue(envFile, TELEGRAM_TOKEN_ENV, value);
+      if (
+        value !== null &&
+        gitignore &&
+        ensureGitignoreLine(gitignore, '.env')
+      ) {
+        this.logger.log(`Added .env to ${gitignore}`);
+      }
+    } else if (value === null) {
+      deleteSecret(secretsDir, TELEGRAM_TOKEN_SECRET);
     } else {
-      writeSecret(
-        this.options.secretsDir,
-        TELEGRAM_TOKEN_SECRET,
-        telegramBotTokenSchema.parse(token),
-      );
-      this.logger.log('Bot token stored');
+      writeSecret(secretsDir, TELEGRAM_TOKEN_SECRET, value);
     }
+    this.logger.log(
+      value === null ? 'Stored bot token removed' : 'Bot token stored',
+    );
     this.resolve();
     for (const listener of this.listeners) listener(this.current);
   }
@@ -105,9 +124,23 @@ export class TelegramCredentials implements OnModuleInit {
       return;
     }
 
-    const stored = readSecret(this.options.secretsDir, TELEGRAM_TOKEN_SECRET);
+    let stored: string | null;
+    try {
+      stored = this.stored();
+    } catch (error) {
+      // Refused rather than read, as ssh refuses a key others can read.
+      if (!(error instanceof EnvFilePermissionError)) throw error;
+      this.currentSource = 'env-file';
+      this.current = null;
+      this.health.report('telegram', 'degraded', error.message);
+      return;
+    }
     const parsed = stored ? telegramBotTokenSchema.safeParse(stored) : null;
-    this.currentSource = stored ? 'secrets' : null;
+    this.currentSource = stored
+      ? this.options.envFile
+        ? 'env-file'
+        : 'secrets'
+      : null;
     this.current = parsed?.success ? parsed.data : null;
     if (!parsed) {
       this.health.report('telegram', 'unconfigured', 'Bot token is not set');
@@ -120,5 +153,12 @@ export class TelegramCredentials implements OnModuleInit {
         'The stored bot token is not valid; set it again',
       );
     }
+  }
+
+  /** The token stored in `.env` or `secrets/`, trimmed; null when none is. */
+  private stored(): string | null {
+    const { envFile, secretsDir } = this.options;
+    if (!envFile) return readSecret(secretsDir, TELEGRAM_TOKEN_SECRET);
+    return readEnvFile(envFile)?.get(TELEGRAM_TOKEN_ENV)?.trim() || null;
   }
 }

@@ -52,6 +52,8 @@ export class AppModule {
         HistoryRetentionModule,
         TelegramModule.forRoot({
           secretsDir: options.layout.secrets,
+          envFile: options.layout.envFile,
+          gitignore: options.layout.workspaceGitignore,
           env,
           ...(daemonEnv.telegramApiRoot
             ? { apiRoot: daemonEnv.telegramApiRoot }

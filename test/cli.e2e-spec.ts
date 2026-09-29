@@ -1,4 +1,9 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import {
+  type ChildProcess,
+  execFile,
+  execFileSync,
+  spawn,
+} from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -255,6 +260,73 @@ describe('pero CLI (e2e)', { timeout: 60_000 }, () => {
       readFileSync(layout.daemonOutputFile, 'utf8'),
     ];
     for (const text of seen) expect(text).not.toContain(TOKEN.split(':')[1]);
+  });
+
+  it('keeps the token of a workspace in its .env, which Git must ignore', async () => {
+    const workspace = join(realpathSync(tmp), 'ws');
+    const state = dataDirLayout(join(workspace, '.pero'), workspace);
+    others.push(state);
+    const ws = (...args: string[]) => ['-w', workspace, ...args];
+    mkdirSync(workspace);
+    execFileSync('git', ['init', '-q', workspace]);
+    writeFileSync(join(workspace, '.gitignore'), 'node_modules/\n');
+
+    expect((await pero(ws('run'))).code).toBe(0);
+    const set = await pero(ws('settings', 'set', 'telegram-bot-token'), {
+      input: `${TOKEN}\n`,
+    });
+    expect(set).toMatchObject({
+      code: 0,
+      stdout: 'telegram-bot-token is now set (.env)\n',
+    });
+    const envFile = join(workspace, '.env');
+    expect(readFileSync(envFile, 'utf8')).toBe(
+      `PERO_TELEGRAM_BOT_TOKEN=${TOKEN}\n`,
+    );
+    expect(statSync(envFile).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(state.root, 'secrets'))).toBe(false);
+
+    // Stored again, the .gitignore line is not added twice.
+    await pero(ws('settings', 'set', 'telegram-bot-token'), {
+      input: `${OTHER_TOKEN}\n`,
+    });
+    expect(readFileSync(join(workspace, '.gitignore'), 'utf8')).toBe(
+      'node_modules/\n.env\n',
+    );
+    let status: Result | undefined;
+    await vi.waitFor(
+      async () => {
+        status = await pero(ws('status'));
+        expect(status.stdout).toMatch(/telegram +(ok|degraded) +Connected/);
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    expect(status!.stdout).not.toContain('Error:');
+    const show = await pero(ws('settings', 'show'));
+    expect(show.stdout).toMatch(/^telegram-bot-token +set \(\.env\)$/m);
+
+    // A tracked .env is an error, whether or not Pero runs.
+    execFileSync('git', ['-C', workspace, 'add', '-f', '.env']);
+    const tracked = await pero(ws('status'));
+    expect(tracked.code).toBe(0);
+    expect(tracked.stdout).toContain('\nError: .env is tracked by Git');
+    expect((await pero(ws('stop'))).code).toBe(0);
+    const stopped = await pero(ws('status'));
+    expect(stopped.code).toBe(3);
+    expect(stopped.stderr).toContain('Error: .env is tracked by Git');
+
+    const seen = [
+      set.stdout,
+      set.stderr,
+      status!.stdout,
+      show.stdout,
+      readFileSync(state.logFile, 'utf8'),
+      readFileSync(state.daemonOutputFile, 'utf8'),
+    ];
+    for (const text of seen) {
+      expect(text).not.toContain(TOKEN.split(':')[1]);
+      expect(text).not.toContain(OTHER_TOKEN.split(':')[1]);
+    }
   });
 
   it('allows, lists, and denies Telegram chats', async () => {

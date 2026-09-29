@@ -144,7 +144,12 @@ export const SETTINGS_KEYS: readonly SettingsKey[] = [
     set: (value) => ({ telegramBotToken: value }),
     unset: { telegramBotToken: null },
     show: ({ telegramBotToken: { set, source } }) => {
-      const from = source === 'environment' ? TELEGRAM_TOKEN_ENV : source;
+      const from =
+        source === 'environment'
+          ? TELEGRAM_TOKEN_ENV
+          : source === 'env-file'
+            ? '.env'
+            : source;
       if (set) return `set (${from})`;
       return from ? `not valid (${from})` : 'not set';
     },

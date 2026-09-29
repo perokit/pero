@@ -55,15 +55,15 @@ An explicit choice always wins over a workspace found from the current folder, a
 
 ### 5.2 `.env` credentials
 
-Pero's secrets move to `<workspace>/.env`:
+Pero's secrets move to `<workspace>/.env` (`src/config/env-file.ts`):
 
-- **Read:** a small dotenv parser (`KEY=value`, `#` comments, optional quotes). Reading is refused, with a `chmod 600` hint, when group or others can read the file. A variable in the environment wins.
-- **Write:** `pero settings set telegram-bot-token` and the interactive `pero run` write the token atomically with mode `0600`, keeping other lines.
-- **`.gitignore`:** both also make sure the workspace `.gitignore` lists `.env`.
-- **Git check:** when the workspace is in a Git repository, `pero status` reports an error if Git tracks `.env` or wouldn't ignore it (`git ls-files`, `git check-ignore`).
-- **Legacy:** `secrets/telegram-bot-token` is still read as a fallback, in a legacy data directory only.
+- **Read:** a small dotenv parser (`KEY=value`, `export`, `#` comments, optional quotes). Reading is refused, with a `chmod 600` hint in the `telegram` component, when group or others can read the file. A variable in the environment wins.
+- **Write:** `pero settings set telegram-bot-token` and the interactive `pero run` still go through the daemon, which writes the token atomically with mode `0600`, keeping other lines and comments.
+- **`.gitignore`:** writing the token also makes sure the workspace `.gitignore` lists `.env`.
+- **Git check:** when the workspace is in a Git repository, `pero status` reports an error if Git tracks `.env` or wouldn't ignore it (`git ls-files`, `git check-ignore`). The CLI runs the check itself, so it works whether or not Pero runs, and `pero check` can reuse it.
+- **Legacy:** `secrets/telegram-bot-token` is still read and written, in a legacy data directory only. A workspace has no `secrets/`, and its backups carry no token.
 
-`src/config/secret-store.ts` and `TelegramCredentialsService` change accordingly.
+`TelegramCredentials` changes accordingly; the token source `env-file` shows as `set (.env)`.
 
 **Done when:**
 - Tests cover parsing, precedence over the file, the permission refusal, and writing that keeps other lines and comments.

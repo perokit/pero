@@ -52,9 +52,14 @@ export interface DataDirLayout {
   lockFile: string;
   /** The running daemon's pid, version, and socket; JSON. */
   metadataFile: string;
+  /** The legacy `secrets/`; a workspace keeps its secrets in `envFile`. */
   secrets: string;
   /** `.pero/.gitignore`; null for a legacy data directory. */
   stateGitignore: string | null;
+  /** The workspace's `.env`; null for a legacy data directory. */
+  envFile: string | null;
+  /** The workspace's own `.gitignore`; null for a legacy data directory. */
+  workspaceGitignore: string | null;
 }
 
 export class DataDirError extends Error {
@@ -84,6 +89,9 @@ export function dataDirLayout(
     metadataFile: join(run, 'pero.json'),
     secrets: join(root, 'secrets'),
     stateGitignore: workspace === null ? null : join(root, '.gitignore'),
+    envFile: workspace === null ? null : join(workspace, '.env'),
+    workspaceGitignore:
+      workspace === null ? null : join(workspace, '.gitignore'),
   };
 }
 
@@ -108,7 +116,8 @@ export function controlSocketPath(
  * permissions. A root created here is made owner-only; an existing root is
  * left alone because the owner may have pointed Pero at a folder they manage.
  * Pero's own subdirectories are always reset to owner-only. In a workspace,
- * `.pero/.gitignore` is written when it is missing.
+ * `.pero/.gitignore` is written when it is missing, and there is no
+ * `secrets/`: the workspace's `.env` holds them.
  */
 export function ensureDataDir(
   root: string,
@@ -119,7 +128,8 @@ export function ensureDataDir(
     const created = mkdirSync(root, { recursive: true, mode: OWNER_ONLY });
     if (created !== undefined) chmodSync(root, OWNER_ONLY);
     const socketDir = dirname(layout.controlSocket);
-    const dirs = [layout.logs, layout.run, layout.secrets];
+    const dirs = [layout.logs, layout.run];
+    if (workspace === null) dirs.push(layout.secrets);
     if (socketDir !== layout.run) dirs.push(socketDir);
     for (const dir of dirs) {
       mkdirSync(dir, { recursive: true, mode: OWNER_ONLY });

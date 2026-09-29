@@ -55,7 +55,7 @@ Almost everything is configured with `pero settings` while Pero runs (see the [u
 | Workspace | `--workspace`/`-w` (any `pero` command, before or after its name), then `PERO_WORKSPACE`, then the nearest folder holding `.pero/` from the current folder upward (never the home folder itself), then `~/workspace` when it holds `.pero/` | none |
 | Legacy data directory | `--data-dir`, then `PERO_HOME`; used when no workspace is given or found | `~/.pero` |
 | Log level | `PERO_LOG_LEVEL` (`fatal` … `trace`) | `info` |
-| Telegram bot token | `PERO_TELEGRAM_BOT_TOKEN` in the daemon's environment, then `secrets/telegram-bot-token` | none |
+| Telegram bot token | `PERO_TELEGRAM_BOT_TOKEN` in the daemon's environment, then the workspace's `.env` (or `secrets/telegram-bot-token` in a legacy data directory) | none |
 | Telegram Bot API server | `PERO_TELEGRAM_API_ROOT`, such as a [local Bot API server](https://github.com/tdlib/telegram-bot-api) | `https://api.telegram.org` |
 | Echo runtime, for testing only | `PERO_FAKE_RUNTIME=echo`: every Agent answers `echo: <message>` instead of running Claude or Codex | unset |
 
@@ -74,7 +74,7 @@ Pero keeps no provider credentials of its own. It runs Claude Code and Codex wit
 
 Pero never passes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, or `CODEX_API_KEY` on, so a key in its environment cannot switch you to API billing. When a sign-in expires, `pero status` shows that provider `degraded`; sign in again as the same account and run `pero run` to check again.
 
-The Telegram bot token is Pero's one secret. It comes from `PERO_TELEGRAM_BOT_TOKEN` in the daemon's environment when that is set, otherwise from `secrets/telegram-bot-token` in the data directory, which is owner-only and never shown or logged. To change it, including after revoking it with @BotFather `/revoke`, run `printf '%s' "$TOKEN" | pero settings set telegram-bot-token`; Pero switches without a restart. Telegram delivers a bot's updates to one poller at a time, so never run two Peros with the same token: the second shows Telegram `degraded` because another process polls the bot.
+The Telegram bot token is Pero's one secret. It comes from `PERO_TELEGRAM_BOT_TOKEN` in the daemon's environment when that is set, otherwise from the workspace's `.env` (`PERO_TELEGRAM_BOT_TOKEN=…`, a file a systemd `EnvironmentFile=` can read too), or from `secrets/telegram-bot-token` in a legacy data directory. Either file is owner-only and never shown or logged; Pero refuses to read a `.env` that group or others can read, and `pero status` says which `chmod` fixes it. Storing the token writes `.env` atomically, keeping its other lines, and adds `.env` to the workspace's `.gitignore`. When the workspace is in a Git repository, `pero status` reports an error if Git tracks `.env` or would not ignore it. To change it, including after revoking it with @BotFather `/revoke`, run `printf '%s' "$TOKEN" | pero settings set telegram-bot-token`; Pero switches without a restart. Telegram delivers a bot's updates to one poller at a time, so never run two Peros with the same token: the second shows Telegram `degraded` because another process polls the bot.
 
 ## Data layout
 

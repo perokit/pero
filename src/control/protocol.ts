@@ -73,7 +73,11 @@ export const statusResultSchema = z.object({
 
 export type StatusResult = z.infer<typeof statusResultSchema>;
 
-export const TOKEN_SOURCES = ['environment', 'secrets'] as const;
+/**
+ * Where the bot token comes from: the daemon's environment, the workspace's
+ * `.env`, or a legacy data directory's `secrets/`.
+ */
+export const TOKEN_SOURCES = ['environment', 'env-file', 'secrets'] as const;
 
 export type TokenSource = (typeof TOKEN_SOURCES)[number];
 

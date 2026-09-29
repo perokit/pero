@@ -80,7 +80,7 @@ Pero works on a workspace: `--workspace`/`-w`, then `PERO_WORKSPACE`, then the n
 
 Only providers in use count toward health: the default provider and any provider an enabled Agent uses. The other one is still listed in `pero status`, marked `(not in use)`, and setup does not ask to sign in to it. The daemon runs `claude auth status` and `codex login status` as its own account when it starts and whenever `pero run` asks.
 
-The Telegram bot token is stored in `secrets/telegram-bot-token` (owner-only, replaced atomically), never in SQLite, logs, `pero status`, or `pero settings show`. A token in the daemon's environment as `PERO_TELEGRAM_BOT_TOKEN` wins over the stored one, which suits a service manager; `pero run` passes its own environment to the daemon it starts. Changing the token takes effect without a restart.
+The Telegram bot token is stored in the workspace's `.env` as `PERO_TELEGRAM_BOT_TOKEN`, or in `secrets/telegram-bot-token` in a legacy data directory (owner-only, replaced atomically, and `.env` is added to the workspace's `.gitignore`), never in SQLite, logs, `pero status`, or `pero settings show`. A token in the daemon's environment as `PERO_TELEGRAM_BOT_TOKEN` wins over the stored one, which suits a service manager; `pero run` passes its own environment to the daemon it starts. Changing the token takes effect without a restart.
 
 ### Telegram setup
 

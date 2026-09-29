@@ -36,6 +36,8 @@ describe('dataDirLayout', () => {
       metadataFile: '/srv/pero/run/pero.json',
       secrets: '/srv/pero/secrets',
       stateGitignore: null,
+      envFile: null,
+      workspaceGitignore: null,
     });
   });
 
@@ -46,6 +48,8 @@ describe('dataDirLayout', () => {
       workspace: '/srv/ws',
       database: '/srv/ws/.pero/pero.sqlite',
       stateGitignore: '/srv/ws/.pero/.gitignore',
+      envFile: '/srv/ws/.env',
+      workspaceGitignore: '/srv/ws/.gitignore',
     });
   });
 });
@@ -125,6 +129,12 @@ describe('ensureDataDir', () => {
     writeFileSync(layout.stateGitignore!, '*\n');
     ensureDataDir(join(workspace, '.pero'), workspace);
     expect(readFileSync(layout.stateGitignore!, 'utf8')).toBe('*\n');
+  });
+
+  it('makes no secrets/ in a workspace', () => {
+    const workspace = join(tmp, 'ws');
+    const layout = ensureDataDir(join(workspace, '.pero'), workspace);
+    expect(() => statSync(layout.secrets)).toThrow();
   });
 
   it('writes no .gitignore into a legacy data directory', () => {

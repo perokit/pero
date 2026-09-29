@@ -1,13 +1,6 @@
-import {
-  closeSync,
-  fsyncSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeSync,
-} from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeFileAtomic } from './atomic-file.js';
 
 // Shared by the CLI and the daemon. Keep this free of Nest and TypeORM imports.
 
@@ -31,22 +24,7 @@ export function readSecret(dir: string, name: string): string | null {
  * owner-only from the moment it exists.
  */
 export function writeSecret(dir: string, name: string, value: string): void {
-  const file = join(dir, name);
-  const temporary = `${file}.${process.pid}.tmp`;
-  rmSync(temporary, { force: true });
-  const fd = openSync(temporary, 'wx', 0o600);
-  try {
-    writeSync(fd, `${value}\n`);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    renameSync(temporary, file);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
+  writeFileAtomic(join(dir, name), `${value}\n`, 0o600);
 }
 
 /** Removes secret `name`; nothing happens when it is not stored. */

@@ -80,10 +80,11 @@ export class BackupService implements BeforeApplicationShutdown {
       const snapshot = join(staging, DATABASE_ENTRY);
       await this.connection().backup(snapshot);
       await chmod(snapshot, 0o600);
-      const secrets = await copySecrets(
-        this.layout.secrets,
-        join(staging, SECRETS_ENTRY),
-      );
+      // A workspace keeps its token in .env, which is never backed up.
+      const secrets =
+        this.layout.workspace === null
+          ? await copySecrets(this.layout.secrets, join(staging, SECRETS_ENTRY))
+          : [];
       const manifest: BackupManifest = {
         format: BACKUP_FORMAT,
         peroVersion: PACKAGE_VERSION,
