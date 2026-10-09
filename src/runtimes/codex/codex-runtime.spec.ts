@@ -1,3 +1,4 @@
+import { FILE_NOTE } from '../../agents/agent-request.js';
 import { Logger } from '@nestjs/common';
 import type {
   CodexOptions,
@@ -114,7 +115,7 @@ describe('CodexRuntime', () => {
       { type: 'text', delta: 'Hi' },
       { type: 'result', text: 'Hi' },
     ]);
-    expect(calls[0]!.input).toBe('Hello');
+    expect(calls[0]!.input).toBe(`${FILE_NOTE}\n\nOwner message:\nHello`);
     expect(calls[0]!.resumed).toBeUndefined();
   });
 
@@ -135,7 +136,7 @@ describe('CodexRuntime', () => {
     );
 
     expect(calls[0]!.input).toEqual([
-      { type: 'text', text: 'What are these?' },
+      { type: 'text', text: `${FILE_NOTE}\n\nOwner message:\nWhat are these?` },
       { type: 'local_image', path: '/ws/.pero/attachments/1/a.jpg' },
       { type: 'local_image', path: '/ws/.pero/attachments/1/c.png' },
     ]);
@@ -153,7 +154,7 @@ describe('CodexRuntime', () => {
       ),
     );
 
-    expect(calls[0]!.input).toBe('Sum it up');
+    expect(calls[0]!.input).toBe(`${FILE_NOTE}\n\nOwner message:\nSum it up`);
   });
 
   it('works in the folder, leaving out unset options', async () => {

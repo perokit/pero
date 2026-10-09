@@ -235,6 +235,14 @@ pero runs cancel 7   # cancel run 7
 
 `pero runs cancel <id>` cancels a run: one waiting to start never does, and a running one has its turn stopped. `pero runs retry <id>` queues a failed, interrupted, or cancelled run again as a new run with the next attempt, whatever `max-attempts` allows, reading the same Channel history.
 
+### Receiving files and results
+
+Send a document or ZIP with a description of what you want done. `/files` shows the active limits; on a small server, a large audio recording can take several minutes. Pero posts a processing notice for large uploads and recordings, then their bytes and elapsed time. You can use other topics while it processes, or `/stop` to cancel processing in the current topic. The cloud Telegram API cannot download files over 20 MiB; receiving larger files requires a local Bot API configured by the server's owner.
+
+Ask Pero to attach the result in the chat. Generated images appear inline, MP3/M4A files in the audio player, videos as video, and other files as downloadable documents. Static HTML/SVG designs get a screenshot and their source file when Chromium is installed. WAV/FLAC/AIFF results get an MP3 preview when ffmpeg can convert them. Results go to the topic that requested them. If delivery fails, Pero says so in the chat; a path alone does not count as delivery.
+
+Agents request delivery with a standalone `<file>relative/path.ext</file>` line, or a standalone Markdown image/file link pointing to a local file. Use files inside the Channel's working directory or the data folder. Hidden/private files and paths outside those folders are refused. Up to ten files can be attached per answer. The same directives work for Workflow answers when their files are in the workspace or data folder.
+
 ### Reading chat history
 
 A Workflow can read Channel history as its input, so Pero can review your chats on a schedule. With `history: true`, each run puts a transcript of the conversation, what people wrote and what Pero answered, since the previous successful run (the last 24 hours for the first) in place of `{{history}}` in its input, or after the input. The next run starts where that one ended, so each message is read once, and a retry reads the same messages as the run it retries. `history-hours` reads a fixed window instead.

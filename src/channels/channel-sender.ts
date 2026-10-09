@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import { saveStream } from '../common/file-transfer.js';
+import { fileReply } from './file-reply.js';
+import { FileDelivery } from './file-delivery.js';
 import { InvalidInputError, NotFoundError } from '../common/errors.js';
 import { topicReply } from './topic-reply.js';
 import {
@@ -49,6 +52,7 @@ export class ChannelSender {
   constructor(
     private readonly history: MessageHistory,
     private readonly speech: SpeechService,
+    private readonly files: FileDelivery,
   ) {}
 
   add(adapter: ChannelAdapter): void {
@@ -125,13 +129,19 @@ export class ChannelSender {
     kind: IntegrationKind,
     address: ChannelAddress,
     answer: string,
+    workingDirectory?: string,
   ): Promise<SentAnswer> {
     const reply = topicReply(answer);
     if (reply.names.length > 0) {
       let first: SentMessage | undefined;
       const texts: string[] = [];
       if (reply.text !== '') {
-        const body = await this.sendBody(kind, address, reply.text);
+        const body = await this.sendBody(
+          kind,
+          address,
+          reply.text,
+          workingDirectory,
+        );
         first = body.sent;
         texts.push(body.text);
       }
@@ -167,10 +177,47 @@ export class ChannelSender {
       }
       return { sent: first!, text: texts.join('\n\n') };
     }
-    return this.sendBody(kind, address, answer);
+    return this.sendBody(kind, address, answer, workingDirectory);
   }
 
   private async sendBody(
+    kind: IntegrationKind,
+    address: ChannelAddress,
+    answer: string,
+    workingDirectory?: string,
+  ): Promise<SentAnswer> {
+    const reply = fileReply(answer);
+    if (reply.paths.length === 0) return this.sendParts(kind, address, answer);
+    let first: SentMessage | undefined;
+    const kept: string[] = [];
+    if (reply.text !== '') {
+      const body = await this.sendParts(kind, address, reply.text);
+      first = body.sent;
+      kept.push(body.text);
+    }
+    for (const path of reply.paths) {
+      try {
+        const result = await this.files.deliver(
+          this.adapter(kind),
+          address,
+          path,
+          workingDirectory,
+        );
+        first ??= result.sent;
+        kept.push(result.text);
+        if (result.text.includes('unavailable;'))
+          await this.send(kind, address, { text: result.text });
+      } catch (error) {
+        const text = `Pero couldn't send a result file: ${describe(error)}. Ask it to correct the file or produce a smaller preview.`;
+        const sent = await this.send(kind, address, { text });
+        first ??= sent;
+        kept.push(text);
+      }
+    }
+    return { sent: first!, text: kept.join('\n\n') };
+  }
+
+  private async sendParts(
     kind: IntegrationKind,
     address: ChannelAddress,
     answer: string,
@@ -226,11 +273,13 @@ export class ChannelSender {
     channel: Pick<Channel, 'id' | 'integrationKind' | 'address'>,
     answer: string,
     author: Author,
+    workingDirectory?: string,
   ): Promise<SentMessage> {
     const { sent, text } = await this.sendAnswer(
       channel.integrationKind,
       channel.address,
       answer,
+      workingDirectory,
     );
     await this.record(channel, sent, text, author);
     return sent;
@@ -244,6 +293,27 @@ export class ChannelSender {
   /** The contents of a file a message from `kind` came with. */
   download(kind: IntegrationKind, ref: string): Promise<Uint8Array> {
     return this.adapter(kind).download(ref);
+  }
+
+  async downloadTo(
+    kind: IntegrationKind,
+    ref: string,
+    path: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    const adapter = this.adapter(kind);
+    if (adapter.downloadTo !== undefined)
+      return adapter.downloadTo(ref, path, maxBytes, signal);
+    const data = await adapter.download(ref);
+    signal?.throwIfAborted();
+    return saveStream(
+      path,
+      (async function* () {
+        yield data;
+      })(),
+      maxBytes,
+    );
   }
 
   /** Replaces the text and buttons of a message sent through `kind`. */

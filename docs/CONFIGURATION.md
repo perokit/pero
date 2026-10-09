@@ -119,7 +119,9 @@ speech:
     engine: local            # local, elevenlabs, or off. Default: local
     model: .pero/models/ggml-base.bin   # local: a whisper.cpp model; elevenlabs: scribe_v1
     language: en             # Default: detected
-    max-minutes: 10          # longer recordings aren't transcribed. Default: 10
+    max-minutes: 60          # recording duration limit, 1–240 minutes. Default: 60
+    timeout-seconds: 3600    # local Whisper processing budget, 1–86400 seconds
+    convert-timeout-seconds: 300 # ffmpeg conversion budget, 1–86400 seconds
   speak:                     # the voice messages Pero sends
     engine: local            # local, elevenlabs, or off. Default: local
     voice: .pero/models/en_US-lessac-medium.onnx   # local: a Piper voice; elevenlabs: a voice ID
@@ -128,6 +130,15 @@ speech:
     ffmpeg: ffmpeg
     whisper: whisper-cli
     piper: piper
+
+# Incoming files and generated results; every setting is optional.
+files:
+  max-mb: 512                # actual streamed bytes, 1–2000 MiB
+  download-timeout-seconds: 600
+  upload-timeout-seconds: 600
+  previews: true             # static HTML/SVG image previews
+  # telegram-api-root: http://127.0.0.1:8081
+  # telegram-local-file-root: /srv/telegram-bot-api
 ```
 
 - **Hand edits and `pero telegram allow`/`deny` are equivalent.** The commands edit this file and keep comments and ordering, and work without Pero running. Pero rereads the file within 10 seconds either way: a chat added or removed is served, or turned away, from its next message.
@@ -136,6 +147,12 @@ speech:
 - **`speech` is written for you** by `pero speech configure`, which asks which engine to use for each direction and changes only those lines; editing it by hand works too.
 - **`speech` applies from the next voice message.** Each direction has its own engine. `local` runs whisper.cpp, Piper, and ffmpeg on the host, with the models `pero speech configure` downloads to `.pero/models/` unless `model` or `voice` names other files, relative to the workspace; a Piper voice needs its `.onnx.json` beside it. `elevenlabs` needs `ELEVENLABS_API_KEY` in `.env` or Pero's environment; `voice` is an ElevenLabs voice ID, which `pero speech voice` picks from your account's voices; without one, Pero speaks with ElevenLabs' *George*. These are host settings, since the programs run on the host: a turn can't change them.
 - **An invalid file** stops startup with the file, line, key, and reason. An invalid edit while Pero runs is logged and shown by `pero status`, and the last valid version stays in use.
+
+**File limits:** `max-mb` limits both incoming files and outgoing originals. The limit is checked against actual bytes during downloads, including when size metadata is missing. Partial downloads are removed. Transfer budgets and preview settings apply to new operations; restart Pero after changing `telegram-api-root` or the client's upload timeout. `telegram-local-file-root` is the explicitly allowed directory for absolute paths returned by a local Bot API, including shared storage mounted at the same path.
+
+Telegram's cloud Bot API still limits downloads to 20 MiB and most uploads to 50 MiB. Increasing `max-mb` cannot override this. To receive large ZIPs, run an authenticated [local Bot API server](https://core.telegram.org/bots/api#using-a-local-bot-api-server), migrate the bot as Telegram documents, and configure its URL here. It supports uploads up to 2000 MiB and downloads without a Telegram size limit; Pero's own cap still applies. A proxy to the cloud API does not lift cloud limits. ZIPs are saved as attachments for the agent's tools, not automatically extracted.
+
+The local processing budget is separate from recording duration: a 30-minute recording can take longer than 30 minutes to transcribe on a small VPS. `timeout-seconds` controls local Whisper, while `convert-timeout-seconds` controls local ffmpeg conversion. Cloud speech engines keep their provider-specific timeouts. Actual converted recording duration is checked too, so missing Telegram metadata does not bypass the duration limit.
 
 The data folder can be an existing vault anywhere, such as `data: ~/notes`. Pero works in the workspace, where your scripts, Git repository, and other tools are, unless a Channel note names another folder; every turn's instructions say where the data folder is, so that's where Pero keeps notes and other files it writes for you.
 

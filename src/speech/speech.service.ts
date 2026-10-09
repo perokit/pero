@@ -146,6 +146,9 @@ export class SpeechService implements OnModuleInit {
       localPrograms(speech.programs, this.workspace()),
       whisperModelPath(speech, this.workspace()),
       language,
+      speech.transcribe.timeoutSeconds * 1000,
+      speech.transcribe.convertTimeoutSeconds * 1000,
+      speech.transcribe.maxMinutes * 60,
     );
   }
 

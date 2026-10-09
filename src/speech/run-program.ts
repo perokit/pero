@@ -57,6 +57,7 @@ export function runProgram(
     const child = spawn(program, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+      detached: process.platform !== 'win32',
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -72,6 +73,22 @@ export function runProgram(
       if (error.code === 'ENOENT') {
         reject(new SpeechError(`${name} isn't installed`));
       } else if (error.name === 'AbortError') {
+        // ffmpeg and preview workers may have descendants; stop the whole group.
+        if (child.pid !== undefined && process.platform !== 'win32') {
+          const pid = child.pid;
+          try {
+            process.kill(-pid, 'SIGTERM');
+          } catch {
+            /* Already gone. */
+          }
+          setTimeout(() => {
+            try {
+              process.kill(-pid, 'SIGKILL');
+            } catch {
+              /* Already gone. */
+            }
+          }, 5000).unref();
+        }
         reject(
           new SpeechError(
             signal.aborted

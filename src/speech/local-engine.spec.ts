@@ -116,11 +116,58 @@ describe('the local engine', () => {
       ),
     ).resolves.toBe('Hello there.');
     expect(readFileSync(join(folder, 'ffmpeg.args'), 'utf8')).toContain(
-      `-i ${voice} -vn -ar 16000 -ac 1 -c:a pcm_s16le`,
+      `-i ${voice} -vn -t 3601 -ar 16000 -ac 1 -c:a pcm_s16le`,
     );
     expect(readFileSync(join(folder, 'whisper.args'), 'utf8')).toMatch(
       /^-m \/models\/ggml-base\.bin -f \S+input\.wav -l auto --no-timestamps --no-prints$/m,
     );
+  });
+
+  it('uses a configurable processing budget and can cancel a long Whisper run', async () => {
+    const voice = join(folder, 'voice.ogg');
+    writeFileSync(voice, 'ogg');
+    const slow = program('whisper-cli', 'exec sleep 3');
+    const limited = new LocalTranscriber(
+      { ffmpeg: ffmpeg(), whisper: slow },
+      '/model.bin',
+      null,
+      30,
+    );
+    await expect(
+      limited.transcribe(
+        { path: voice, type: 'audio/ogg' },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('took longer than 0.03 s');
+    const controller = new AbortController();
+    const pending = new LocalTranscriber(
+      { ffmpeg: ffmpeg(), whisper: slow },
+      '/model.bin',
+      null,
+      10000,
+    ).transcribe({ path: voice, type: 'audio/ogg' }, controller.signal);
+    setTimeout(() => controller.abort(), 100);
+    await expect(pending).rejects.toThrow('was stopped');
+  });
+
+  it('checks actual WAV duration when the sender did not supply it', async () => {
+    const voice = join(folder, 'voice.wav');
+    writeFileSync(voice, wav(96000));
+    const whisper = program('whisper-cli', 'echo unexpected');
+    const transcriber = new LocalTranscriber(
+      { ffmpeg: ffmpeg(), whisper },
+      '/model.bin',
+      null,
+      1000,
+      1000,
+      2,
+    );
+    await expect(
+      transcriber.transcribe(
+        { path: voice, type: 'audio/wav' },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('longer than');
   });
 
   it('speaks with Piper, then encodes OGG with Opus', async () => {

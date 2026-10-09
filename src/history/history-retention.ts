@@ -123,7 +123,7 @@ export class HistoryRetention
       for (const name of await readdir(dir)) {
         const path = join(dir, name);
         if ((await stat(path)).mtime < cutoff) {
-          await rm(path, { force: true });
+          await rm(path, { force: true, recursive: true });
           deleted++;
         }
       }

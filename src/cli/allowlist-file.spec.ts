@@ -13,7 +13,11 @@ import {
   type WorkspaceLayout,
   workspaceLayout,
 } from '../config/workspace-layout.js';
-import { DEFAULT_SPEECH, readHostConfig } from '../config/host-config.js';
+import {
+  DEFAULT_SPEECH,
+  DEFAULT_FILES,
+  readHostConfig,
+} from '../config/host-config.js';
 import { allowInFile, denyInFile } from './allowlist-file.js';
 
 describe('allowing and denying in config.yaml', () => {
@@ -49,6 +53,7 @@ describe('allowing and denying in config.yaml', () => {
       system: null,
       allowedChats: [{ chatKey: '-1001234567890', title: null }],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     });
   });
 

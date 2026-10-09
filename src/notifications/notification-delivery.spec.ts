@@ -6,6 +6,7 @@ import type { AgentChannelTurns } from '../channels/agent-channel-turns.js';
 import { AllowedChatsService } from '../channels/allowed-chats.service.js';
 import { ChannelRouter } from '../channels/channel-router.js';
 import { ChannelSender } from '../channels/channel-sender.js';
+import { FileDelivery } from '../channels/file-delivery.js';
 import { ChannelTurns } from '../channels/channel-stages.js';
 import { ChannelsModule } from '../channels/channels.module.js';
 import {
@@ -491,6 +492,7 @@ describe('NotificationDelivery', () => {
         new ChannelSender(
           moduleRef.get(MessageHistory),
           moduleRef.get(SpeechService),
+          moduleRef.get(FileDelivery),
         ),
         moduleRef.get(AllowedChatsService),
         delivery,

@@ -12,6 +12,7 @@ import { ChannelOnboardingService } from './channel-onboarding.service.js';
 import { ChannelRouter } from './channel-router.js';
 import { ChannelAttachments } from './channel-attachments.js';
 import { ChannelSender } from './channel-sender.js';
+import { FileDelivery } from './file-delivery.js';
 import { ChannelViews } from './channel-views.service.js';
 import { ChannelCommands } from './commands/channel-commands.service.js';
 import { WorkflowCommands } from './commands/workflow-commands.js';
@@ -45,6 +46,7 @@ import {
     ChannelCommands,
     WorkflowCommands,
     ChannelSender,
+    FileDelivery,
     ChannelAttachments,
     ChannelViews,
     AllowedChatsService,

@@ -6,6 +6,7 @@ import {
   type ModelReasoningEffort,
   type ThreadOptions,
 } from '@openai/codex-sdk';
+import { FILE_NOTE } from '../../agents/agent-request.js';
 import { imageTypeOf } from '../../common/images.js';
 import { CODEX_EFFORTS } from '../../config/provider-options.js';
 import {
@@ -165,9 +166,11 @@ function codexInput(request: RuntimeRequest): Input {
   const images = (request.attachments ?? []).filter(
     (path) => imageTypeOf(path) !== null,
   );
-  if (images.length === 0) return request.input;
+  // Repeat the host handoff on every turn so resumed threads do not retain an obsolete delivery model.
+  const input = `${FILE_NOTE}\n\nOwner message:\n${request.input}`;
+  if (images.length === 0) return input;
   return [
-    { type: 'text', text: request.input },
+    { type: 'text', text: input },
     ...images.map((path) => ({ type: 'local_image' as const, path })),
   ];
 }

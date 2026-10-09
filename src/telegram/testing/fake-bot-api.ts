@@ -64,6 +64,7 @@ export class FakeBotApi {
   readonly chats = new Map<string, Chat>();
   /** Files the bot can download, by file ID; any other ID is invalid. */
   readonly files = new Map<string, Uint8Array>();
+  readonly filePaths = new Map<string, string>();
 
   private server: Server | null = null;
   private readonly updates: Update[] = [];
@@ -187,6 +188,9 @@ export class FakeBotApi {
         return this.sendMessage(res, payload);
       case 'sendVoice':
       case 'sendAudio':
+      case 'sendPhoto':
+      case 'sendDocument':
+      case 'sendVideo':
         return this.sendMessage(res, payload);
       case 'editMessageText':
         return this.ok(res, {
@@ -239,7 +243,7 @@ export class FakeBotApi {
       file_id: fileId,
       file_unique_id: `unique-${fileId}`,
       file_size: file.length,
-      file_path: `files/${fileId}`,
+      file_path: this.filePaths.get(fileId) ?? `files/${fileId}`,
     });
   }
 

@@ -22,6 +22,10 @@ export const COMMANDS: readonly CommandInfo[] = [
   },
   { name: 'stop', description: "Stop Pero's answer in this topic" },
   { name: 'topic', description: 'Create a topic in this Telegram group' },
+  {
+    name: 'files',
+    description: 'File limits, audio processing time and result delivery',
+  },
   { name: 'model', description: "Show or change this topic's model" },
   {
     name: 'effort',

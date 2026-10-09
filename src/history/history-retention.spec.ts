@@ -138,11 +138,17 @@ describe('HistoryRetention', () => {
     saved('old.jpg', 31);
     saved('old-report.pdf', 31);
     saved('recent.png', 29);
+    const extracted = join(folder, 'old.zip.contents-fixture');
+    mkdirSync(extracted);
+    writeFileSync(join(extracted, 'note.txt'), 'old attachment data');
+    const old = new Date(NOW.getTime() - 31 * DAY_MS);
+    utimesSync(extracted, old, old);
 
     expect(await retention.prune(NOW)).toBe(0);
     expect(readdirSync(folder).sort()).toEqual([
       'old-report.pdf',
       'old.jpg',
+      'old.zip.contents-fixture',
       'recent.png',
     ]);
 

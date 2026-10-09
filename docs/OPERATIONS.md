@@ -146,7 +146,27 @@ To install them yourself instead, such as on a system Pero doesn't know, put the
 
 Then `pero speech` (or `pero speech configure`) downloads `ggml-base.bin` (whisper.cpp's multilingual base model, 148 MB) and the `en_US-lessac-medium` Piper voice (63 MB) from Hugging Face into `.pero/models/`; `pero speech configure --transcribe local --speak local --yes` does it, and installs the programs, without asking, for scripts. A larger whisper.cpp model transcribes better and more slowly: download it and name it in `speech.transcribe.model`. Piper has [voices in many languages](https://huggingface.co/rhasspy/piper-voices); name the `.onnx` file in `speech.speak.voice`, with its `.onnx.json` beside it.
 
-Pero converts each recording to 16 kHz mono WAV for whisper.cpp, and Piper's WAV to OGG with Opus, which Telegram shows as a voice message. Recordings longer than `speech.transcribe.max-minutes` (10 by default) aren't transcribed. Each program run is limited in time, and temporary files are deleted after it.
+Pero converts each recording to 16 kHz mono WAV for whisper.cpp, and Piper's WAV to OGG with Opus, which Telegram shows as a voice message. Recordings longer than `speech.transcribe.max-minutes` (60 by default) aren't transcribed. Local Whisper has a configurable 3600-second processing budget; local ffmpeg conversion defaults to 300 seconds. These are separate from recording duration. Each program run is limited in time, and temporary files are deleted after it.
+
+### Files and result previews
+
+Use `/files` in Telegram to see file caps, transfer budgets, audio processing limits, and preview settings. [Configuration](./CONFIGURATION.md#peroconfigyaml) describes `files` and `speech.transcribe`. Large files stream to disk instead of being buffered in the daemon. At most two incoming file messages are processed together; messages in one topic retain arrival order, while other topics and commands remain responsive. `/stop` cancels incoming processing in that topic as well as its agent turn. Shutdown cancels incoming processing before draining agent turns.
+
+For HTML/SVG previews, install Chromium as the service account from the Pero installation directory (`node_modules/@perokit/pero` inside a global npm prefix):
+
+```sh
+npx playwright install chromium
+# On a host missing browser libraries, an administrator can install them:
+npx playwright install-deps chromium
+```
+
+Rendering runs in a separate process with a 45-second budget, JavaScript disabled, and remote requests blocked. Local assets must remain inside the design's directory and exclude hidden/private paths. Include a PNG/JPEG for interactive designs. A missing browser or failed preview produces a notice in Telegram, and the original is still attached. WAV/FLAC/AIFF results get a playable MP3 copy using ffmpeg when available, with the original attached as a document.
+
+ZIP attachments are automatically extracted next to the original attachment before the agent starts. This requires `python3` on the host. The extractor supports ZIP64 and validates CRCs; it rejects absolute/traversing paths, backslashes, duplicate paths, symlinks, special files, encryption and unsupported compression. Extraction is limited to 10,000 entries, four times `files.max-mb` (at most 2 GiB total), a 1000:1 per-entry compression ratio and five minutes. Failed/cancelled extraction removes its temporary directory. The agent receives the extracted directory as untrusted data; archive contents are never executed by Pero. History retention removes extracted directories along with old attachments. Large ZIP downloads still require a local Bot API when the cloud download limit is exceeded.
+
+Codex gets the file handoff instructions in every turn input, including resumed sessions. No direct Telegram tool, bot token or network access is required by the agent: it verifies the local file and returns `<file>path</file>`; the host performs the upload.
+
+File diagnostics are metadata only in `.pero/file-events.jsonl`: operation, name, bytes, elapsed milliseconds, success/failure and timestamp. Upload timing covers preparation and delivery of the result, including conversion/preview; preview timing is recorded separately. The owner-only log rotates at 2 MiB to `file-events.previous.jsonl`, keeping one previous file. Neither contents nor full paths nor credentials are recorded. These logs are local diagnostics and are not part of a backup.
 
 `pero status` shows the `speech` component: `ok` with each direction's engine, `unconfigured` when neither works (with the first thing missing), or `degraded` when only one does. It's optional, so it never makes Pero's health `degraded`. Models aren't in `pero backup`; on a new machine, `pero speech` offers to download them again.
 

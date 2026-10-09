@@ -73,6 +73,9 @@ export interface SpeechConfig {
     language: string | null;
     /** Longer voice messages aren't transcribed. */
     maxMinutes: number;
+    /** CPU time budget, separate from the recording's duration. */
+    timeoutSeconds: number;
+    convertTimeoutSeconds: number;
   };
   speak: {
     engine: SpeechEngine;
@@ -87,9 +90,35 @@ export interface SpeechConfig {
 
 /** `speech` when `config.yaml` sets none of it. */
 export const DEFAULT_SPEECH: SpeechConfig = {
-  transcribe: { engine: 'local', model: null, language: null, maxMinutes: 10 },
+  transcribe: {
+    engine: 'local',
+    model: null,
+    language: null,
+    maxMinutes: 60,
+    timeoutSeconds: 3600,
+    convertTimeoutSeconds: 300,
+  },
   speak: { engine: 'local', voice: null, model: null },
   programs: { ffmpeg: 'ffmpeg', whisper: 'whisper-cli', piper: 'piper' },
+};
+
+/** File limits apply independently of Telegram's transport limits. */
+export interface FilesConfig {
+  maxMb: number;
+  downloadTimeoutSeconds: number;
+  uploadTimeoutSeconds: number;
+  previews: boolean;
+  telegramApiRoot: string | null;
+  telegramLocalFileRoot: string | null;
+}
+
+export const DEFAULT_FILES: FilesConfig = {
+  maxMb: 512,
+  downloadTimeoutSeconds: 600,
+  uploadTimeoutSeconds: 600,
+  previews: true,
+  telegramApiRoot: null,
+  telegramLocalFileRoot: null,
 };
 
 /** `config.yaml` as Pero uses it. */
@@ -100,6 +129,7 @@ export interface HostConfig {
   system: string | null;
   allowedChats: HostAllowedChat[];
   speech: SpeechConfig;
+  files: FilesConfig;
 }
 
 const EMPTY: HostConfig = {
@@ -107,6 +137,7 @@ const EMPTY: HostConfig = {
   system: null,
   allowedChats: [],
   speech: DEFAULT_SPEECH,
+  files: DEFAULT_FILES,
 };
 
 const folder = z
@@ -132,6 +163,25 @@ const setting = z
   .trim()
   .min(1, 'must not be empty');
 
+const seconds = z
+  .union([z.bigint(), z.number()])
+  .transform(Number)
+  .pipe(z.number().int().min(1).max(86400));
+const apiRoot = setting.refine((value) => {
+  try {
+    const url = new URL(value);
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}, 'must be an HTTP(S) API root without credentials, query or fragment');
+
 const speech = z.strictObject({
   transcribe: z
     .strictObject({
@@ -145,9 +195,11 @@ const speech = z.strictObject({
           z
             .number()
             .positive('must be more than 0')
-            .max(60, 'must be at most 60'),
+            .max(240, 'must be at most 240'),
         )
         .nullish(),
+      'timeout-seconds': seconds.nullish(),
+      'convert-timeout-seconds': seconds.nullish(),
     })
     .nullish(),
   speak: z
@@ -196,6 +248,20 @@ const schema = z.strictObject({
     })
     .nullish(),
   speech: speech.nullish(),
+  files: z
+    .strictObject({
+      'max-mb': z
+        .union([z.bigint(), z.number()])
+        .transform(Number)
+        .pipe(z.number().int().min(1).max(2000))
+        .nullish(),
+      'download-timeout-seconds': seconds.nullish(),
+      'upload-timeout-seconds': seconds.nullish(),
+      previews: z.boolean().nullish(),
+      'telegram-api-root': apiRoot.nullish(),
+      'telegram-local-file-root': folder.nullish(),
+    })
+    .nullish(),
 });
 
 const PARSE_OPTIONS = {
@@ -479,7 +545,7 @@ function check(
     throw new ConfigError(`Invalid ${file}:\n${lines.join('\n')}`);
   }
 
-  const { data, system, telegram, speech } = parsed.data;
+  const { data, system, telegram, speech, files } = parsed.data;
   return {
     document,
     config: {
@@ -491,6 +557,19 @@ function check(
         title: chat.title ?? null,
       })),
       speech: speechConfig(speech),
+      files: {
+        maxMb: files?.['max-mb'] ?? DEFAULT_FILES.maxMb,
+        downloadTimeoutSeconds:
+          files?.['download-timeout-seconds'] ??
+          DEFAULT_FILES.downloadTimeoutSeconds,
+        uploadTimeoutSeconds:
+          files?.['upload-timeout-seconds'] ??
+          DEFAULT_FILES.uploadTimeoutSeconds,
+        previews: files?.previews ?? DEFAULT_FILES.previews,
+        telegramApiRoot:
+          files?.['telegram-api-root']?.replace(/\/$/, '') ?? null,
+        telegramLocalFileRoot: files?.['telegram-local-file-root'] ?? null,
+      },
     },
   };
 }
@@ -506,6 +585,11 @@ function speechConfig(
       model: parsed?.transcribe?.model ?? transcribe.model,
       language: parsed?.transcribe?.language ?? transcribe.language,
       maxMinutes: parsed?.transcribe?.['max-minutes'] ?? transcribe.maxMinutes,
+      timeoutSeconds:
+        parsed?.transcribe?.['timeout-seconds'] ?? transcribe.timeoutSeconds,
+      convertTimeoutSeconds:
+        parsed?.transcribe?.['convert-timeout-seconds'] ??
+        transcribe.convertTimeoutSeconds,
     },
     speak: {
       engine: parsed?.speak?.engine ?? speak.engine,
