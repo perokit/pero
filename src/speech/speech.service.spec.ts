@@ -145,6 +145,6 @@ describe('SpeechService', () => {
     await expect(
       keyed.speak('a'.repeat(MAX_VOICE_CHARACTERS + 1)),
     ).rejects.toThrow(new SpeechError('it is longer than 4,000 characters'));
-    expect(keyed.maxDurationS()).toBe(600);
+    expect(keyed.maxDurationS()).toBe(3600);
   });
 });

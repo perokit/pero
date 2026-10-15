@@ -40,7 +40,7 @@ export class FakeSpeech implements Pick<
     return this.speakFails === null;
   }
 
-  async transcribe(file: AudioFile): Promise<string> {
+  async transcribe(file: AudioFile, _signal?: AbortSignal): Promise<string> {
     if (this.transcribeFails !== null) {
       throw new SpeechError(this.transcribeFails);
     }

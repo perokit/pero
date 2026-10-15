@@ -489,6 +489,48 @@ describe('ChannelRouter', () => {
       );
     });
 
+    it('keeps commands responsive during transcription and /stop cancels that topic', async () => {
+      await channel(GROUP.key, 'default');
+      adapter.files.set('voice', new Uint8Array([1]));
+      const transcribe = vi.spyOn(speech, 'transcribe').mockImplementation(
+        (_file, signal) =>
+          new Promise((_resolve, reject) => {
+            signal!.addEventListener(
+              'abort',
+              () => reject(new Error('was stopped')),
+              { once: true },
+            );
+          }),
+      );
+      const processing = adapter.deliver(
+        inboundMessage(GROUP, {
+          text: '',
+          attachments: [
+            {
+              ref: 'voice',
+              name: 'long.ogg',
+              type: 'audio/ogg',
+              size: 1,
+              media: 'voice',
+              durationS: 300,
+            },
+          ],
+        }),
+      );
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      const filesCommand = inboundMessage(GROUP, { text: '/files' });
+      filesCommand.content.command = { name: 'files', args: '' };
+      await adapter.deliver(filesCommand);
+      expect(
+        adapter.sent.some((sent) => sent.message.text.includes('512')),
+      ).toBe(true);
+      const stopCommand = inboundMessage(GROUP, { text: '/stop' });
+      stopCommand.content.command = { name: 'stop', args: '' };
+      await adapter.deliver(stopCommand);
+      await processing;
+      expect(turns.handle).not.toHaveBeenCalled();
+    });
+
     it('answers the caption of a recording it could not transcribe, saying why', async () => {
       await channel(GROUP.key, 'default');
       speech.maxS = 60;
@@ -511,10 +553,10 @@ describe('ChannelRouter', () => {
         }),
       );
 
-      expect(adapter.sent.map((sent) => sent.message.text)).toEqual([
+      expect(adapter.sent.map((sent) => sent.message.text)).toContain(
         "Pero couldn't transcribe the audio file you sent (it is longer " +
           'than 1:00). It answers the rest of your message without it.',
-      ]);
+      );
       const inbound = await ds
         .getRepository(Message)
         .findOneByOrFail({ direction: 'in' });

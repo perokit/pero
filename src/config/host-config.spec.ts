@@ -13,6 +13,7 @@ import {
   allowChat,
   chatKindOf,
   DEFAULT_SPEECH,
+  DEFAULT_FILES,
   defaultHostConfig,
   denyChat,
   editHostConfig,
@@ -28,6 +29,28 @@ import {
 const BIG = '-1009007199254740993';
 
 describe('parseHostConfig', () => {
+  it('separates recording duration, processing time and file transport limits', () => {
+    const config = parseHostConfig(
+      'config.yaml',
+      'files:\n  max-mb: 512\n  download-timeout-seconds: 900\n  telegram-api-root: http://127.0.0.1:8081\n  telegram-local-file-root: /srv/bot-api\nspeech:\n  transcribe:\n    max-minutes: 120\n    timeout-seconds: 7200\n',
+    );
+    expect(config.files).toMatchObject({
+      maxMb: 512,
+      downloadTimeoutSeconds: 900,
+      telegramApiRoot: 'http://127.0.0.1:8081',
+      telegramLocalFileRoot: '/srv/bot-api',
+    });
+    expect(config.speech.transcribe).toMatchObject({
+      maxMinutes: 120,
+      timeoutSeconds: 7200,
+    });
+    for (const text of [
+      'files:\n  max-mb: 0',
+      'speech:\n  transcribe:\n    timeout-seconds: 0',
+      'files:\n  telegram-api-root: https://user:token@example.com',
+    ])
+      expect(() => parseHostConfig('config.yaml', text)).toThrow();
+  });
   it('reads the data folder, system folder, and allowed chats', () => {
     const config = parseHostConfig(
       'config.yaml',
@@ -50,6 +73,7 @@ describe('parseHostConfig', () => {
         { chatKey: '123456789', title: null },
       ],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     });
   });
 
@@ -59,18 +83,21 @@ describe('parseHostConfig', () => {
       system: null,
       allowedChats: [],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     });
     expect(parseHostConfig('config.yaml', defaultHostConfig())).toEqual({
       data: 'data',
       system: null,
       allowedChats: [],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     });
     expect(parseHostConfig('config.yaml', defaultHostConfig('2024'))).toEqual({
       data: '2024',
       system: null,
       allowedChats: [],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     });
   });
 
@@ -96,6 +123,8 @@ describe('parseHostConfig', () => {
         model: null,
         language: 'de',
         maxMinutes: 2.5,
+        timeoutSeconds: 3600,
+        convertTimeoutSeconds: 300,
       },
       speak: { engine: 'off', voice: null, model: null },
       programs: {

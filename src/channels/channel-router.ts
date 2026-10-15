@@ -65,6 +65,10 @@ export function pairingHint(
 @Injectable()
 export class ChannelRouter implements BeforeApplicationShutdown {
   private readonly logger = new Logger('Channels');
+  private readonly intake = new Map<string, Promise<void>>();
+  private readonly processing = new Map<string, Set<AbortController>>();
+  private fileWorkers = 0;
+  private readonly fileWaiters: (() => void)[] = [];
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -97,6 +101,8 @@ export class ChannelRouter implements BeforeApplicationShutdown {
    * can arrive any more.
    */
   async beforeApplicationShutdown(): Promise<void> {
+    for (const controllers of this.processing.values())
+      for (const controller of controllers) controller.abort();
     await Promise.all(
       this.sender.all().map(async (adapter) => {
         try {
@@ -109,17 +115,64 @@ export class ChannelRouter implements BeforeApplicationShutdown {
       }),
     );
     this.approvals.closeAll();
+    await Promise.all(this.intake.values());
     await this.turns.drain();
   }
 
   /** Routes one message; failures are logged, never thrown at the adapter. */
   async handleMessage(message: InboundMessage): Promise<void> {
+    const key = `${message.integrationKind}:${message.channel.key}`;
+    const command = message.content.command;
+    if (command !== undefined && isCommand(command.name)) {
+      if (command.name === 'stop')
+        for (const controller of this.processing.get(key) ?? [])
+          controller.abort();
+      return this.processMessage(message);
+    }
+    const controller = new AbortController();
+    const controllers = this.processing.get(key) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.processing.set(key, controllers);
+    const task = (this.intake.get(key) ?? Promise.resolve()).then(async () => {
+      const files = (message.content.attachments?.length ?? 0) > 0;
+      if (files) {
+        while (this.fileWorkers >= 2)
+          await new Promise<void>((ready) => this.fileWaiters.push(ready));
+        this.fileWorkers++;
+      }
+      try {
+        await this.processMessage(message, controller.signal);
+      } finally {
+        if (files) {
+          this.fileWorkers--;
+          this.fileWaiters.shift()?.();
+        }
+      }
+    });
+    this.intake.set(key, task);
+    try {
+      await task;
+    } finally {
+      controllers.delete(controller);
+      if (controllers.size === 0) this.processing.delete(key);
+      if (this.intake.get(key) === task) this.intake.delete(key);
+    }
+  }
+
+  private async processMessage(
+    message: InboundMessage,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const { integrationKind: kind, updateId } = message;
     try {
       if (!(await this.admit(kind, message.chat, message.channel.address))) {
         return;
       }
       if (!(await this.claim(kind, updateId))) return;
+      if (signal?.aborted) {
+        await this.inboundUpdates.markProcessed(kind, updateId);
+        return;
+      }
       const command = message.content.command;
       if (command !== undefined && isCommand(command.name)) {
         // Pero's own business: neither the command nor its answer joins
@@ -139,13 +192,33 @@ export class ChannelRouter implements BeforeApplicationShutdown {
         await this.inboundUpdates.markProcessed(kind, updateId);
         return;
       }
-      const saved = await this.saveAttachments(channel, message);
+      const started = Date.now();
+      const large = (message.content.attachments ?? []).some(
+        (file) =>
+          (file.size ?? 0) >= 10 * 1024 * 1024 || (file.durationS ?? 0) >= 300,
+      );
+      if (large)
+        await this.tell(
+          channel,
+          'Receiving your files and processing audio. Large recordings can take several minutes; /stop cancels processing in this topic.',
+        );
+      const saved = await this.saveAttachments(channel, message, signal);
       const attachments =
-        saved && (await this.transcribeRecordings(channel, message, saved));
+        saved &&
+        (await this.transcribeRecordings(channel, message, saved, signal));
       if (attachments === null) {
         await this.inboundUpdates.markProcessed(kind, updateId);
         return;
       }
+      if (signal?.aborted) {
+        await this.inboundUpdates.markProcessed(kind, updateId);
+        return;
+      }
+      if (large)
+        await this.tell(
+          channel,
+          `Processed ${attachments.reduce((sum, file) => sum + (file.size ?? 0), 0)} bytes in ${((Date.now() - started) / 1000).toFixed(1)} s. Preparing the answer.`,
+        );
       // The text names where each file is, for this turn and later ones.
       const text = withAttachmentLines(message.content.text, attachments);
       // Recorded as its update is handed on, so a message a turn gets is
@@ -186,6 +259,7 @@ export class ChannelRouter implements BeforeApplicationShutdown {
   private async saveAttachments(
     channel: RoutedChannel,
     message: InboundMessage,
+    signal?: AbortSignal,
   ): Promise<SavedAttachment[] | null> {
     const attachments = message.content.attachments ?? [];
     if (attachments.length === 0) return [];
@@ -194,6 +268,8 @@ export class ChannelRouter implements BeforeApplicationShutdown {
         channel,
         message.messageId,
         attachments,
+        new Date(),
+        signal,
       );
     } catch (error) {
       this.logger.warn(
@@ -225,11 +301,12 @@ export class ChannelRouter implements BeforeApplicationShutdown {
     channel: RoutedChannel,
     message: InboundMessage,
     attachments: SavedAttachment[],
+    signal?: AbortSignal,
   ): Promise<SavedAttachment[] | null> {
     if (attachments.every((attachment) => attachment.media === undefined)) {
       return attachments;
     }
-    const transcribed = await this.attachments.transcribe(attachments);
+    const transcribed = await this.attachments.transcribe(attachments, signal);
     const failed = transcribed.find(
       (attachment) => attachment.notTranscribed !== undefined,
     );

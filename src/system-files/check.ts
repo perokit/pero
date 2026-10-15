@@ -9,6 +9,7 @@ import {
   DEFAULT_DATA_FOLDER,
   type HostConfig,
   DEFAULT_SPEECH,
+  DEFAULT_FILES,
   hostConfigPath,
   readHostConfig,
   resolveDataFolder,
@@ -77,6 +78,7 @@ export async function checkWorkspace(
       system: null,
       allowedChats: [],
       speech: DEFAULT_SPEECH,
+      files: DEFAULT_FILES,
     };
   } catch (error) {
     config = null;

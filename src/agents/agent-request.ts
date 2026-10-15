@@ -88,6 +88,7 @@ export function agentContext(
     systemFolderNote(note, defaults),
     FORMAT_NOTE,
     TOPIC_NOTE,
+    FILE_NOTE,
     ...(defaults.voice ? [VOICE_NOTE] : []),
   ].join('\n\n');
 }
@@ -132,6 +133,18 @@ export const TOPIC_NOTE =
   'enabled and the bot needs Manage Topics permission. The owner can also ' +
   'send /topic <name> to create one directly. In a direct chat, ask which ' +
   'group they mean instead.';
+
+export const FILE_NOTE =
+  'File delivery is provided by the Pero host AFTER your final answer. You do not need network access, a Telegram API tool, a token or shell requests to Telegram. Even in a resumed session, do not repeat earlier claims that attachments cannot be sent. Verify the result exists locally, then hand it to the host using the file directive below. ' +
+  'Deliver files you create to the owner in Telegram, not just a computer path. ' +
+  'Put each result on a standalone line as <file>path/to/result</file>, outside code fences. ' +
+  'Paths are relative to this Channel working directory, or absolute within it or the data folder. ' +
+  'Send only intended result files; never secrets, hidden files, credentials or unrelated source files. ' +
+  'Pero sends images as photos, MP3/M4A as playable audio, OGG as voice, MP4 as video and other files as documents. ' +
+  'HTML/SVG get a static PNG preview when Chromium is installed; also provide a PNG/JPEG preview for designs if possible. ' +
+  'The preview cannot fetch Internet resources or execute JavaScript; use local assets or a separately rendered screenshot. ' +
+  'At most ten files per answer. Cloud Telegram allows uploads up to 50 MiB; a local Bot API supports larger files within the host limit. ' +
+  'Do not claim delivery succeeded before Pero sends the files. File transfer sizes and elapsed time are recorded in .pero/file-events.jsonl.';
 
 /**
  * Tells the agent, which works in the workspace unless a note names a

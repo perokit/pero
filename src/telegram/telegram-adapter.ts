@@ -5,6 +5,12 @@ import {
   type OnApplicationBootstrap,
 } from '@nestjs/common';
 import { Bot, GrammyError, HttpError, InputFile } from 'grammy';
+import { createReadStream } from 'node:fs';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { responseChunks, saveStream } from '../common/file-transfer.js';
+import { HostConfigService } from '../host-config/host-config.service.js';
 import type { InlineKeyboardMarkup, Update, UserFromGetMe } from 'grammy/types';
 import type { ChatKind } from '../persistence/entities/sql.js';
 import {
@@ -25,6 +31,7 @@ import {
   MAX_BUTTON_ID_BYTES,
   type OutboundMessage,
   type OutboundVoice,
+  type OutboundFile,
   type SentMessage,
 } from '../channels/channel-adapter.js';
 import { ChannelRouter } from '../channels/channel-router.js';
@@ -91,7 +98,6 @@ const LOOKUP_TIMEOUT_MS = 3_000;
 const STOP_TIMEOUT_MS = 5_000;
 
 /** How long downloading a file a message came with may take. */
-const DOWNLOAD_TIMEOUT_MS = 60_000;
 
 interface Connection {
   bot: Bot;
@@ -110,12 +116,14 @@ interface Connection {
 export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
   readonly kind = 'telegram' as const;
   private readonly logger = new Logger('Telegram');
-  private readonly apiRoot: string;
+  private apiRoot: string;
+  private readonly apiRootOverride: string | undefined;
   private handlers: ChannelHandlers | null = null;
   private connection: Connection | null = null;
   private unsubscribe: (() => void) | null = null;
   /** Connects and disconnects one at a time, in order. */
   private switching: Promise<void> = Promise.resolve();
+  private readonly pendingMessages = new Set<Promise<void>>();
   /** Albums waiting for the rest of their parts. */
   private readonly albums = new MediaGroups((message) => this.handOn(message));
 
@@ -125,12 +133,21 @@ export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
     private readonly status: TelegramStatus,
     private readonly allowedChats: AllowedChatsService,
     private readonly router: ChannelRouter,
+    private readonly hostConfig: HostConfigService,
   ) {
-    this.apiRoot = options.apiRoot ?? DEFAULT_TELEGRAM_API_ROOT;
+    this.apiRoot =
+      options.apiRoot ??
+      this.hostConfig.files().telegramApiRoot ??
+      DEFAULT_TELEGRAM_API_ROOT;
+    this.apiRootOverride = options.apiRoot;
   }
 
   /** Connected with or without a token, since a token may come later. */
   async onApplicationBootstrap(): Promise<void> {
+    this.apiRoot =
+      this.apiRootOverride ??
+      this.hostConfig.files().telegramApiRoot ??
+      DEFAULT_TELEGRAM_API_ROOT;
     await this.router.connect(this);
   }
 
@@ -152,6 +169,7 @@ export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
     this.handlers = null;
     this.switchTo(null);
     await this.switching;
+    await Promise.all(this.pendingMessages);
   }
 
   /**
@@ -254,27 +272,150 @@ export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
     return parseAddress(address).chatId;
   }
 
+  async sendFile(
+    address: ChannelAddress,
+    file: OutboundFile,
+  ): Promise<SentMessage> {
+    const bot = this.connection?.bot;
+    if (!bot) throw new Error('Telegram bot token is not set');
+    const limit =
+      this.apiRoot === DEFAULT_TELEGRAM_API_ROOT
+        ? 50 * 1024 * 1024
+        : 2000 * 1024 * 1024;
+    if (
+      file.size > Math.min(limit, this.hostConfig.files().maxMb * 1024 * 1024)
+    ) {
+      throw new Error(
+        'Result exceeds the upload limit; use a local Bot API for files over 50 MiB, or produce smaller parts',
+      );
+    }
+    const target = parseAddress(address);
+    const options = {
+      caption: file.caption.slice(0, 900),
+      ...(target.messageThreadId === undefined
+        ? {}
+        : { message_thread_id: Number(target.messageThreadId) }),
+    };
+    const input = () => new InputFile(file.source(), file.name);
+    const send = (kind: OutboundFile['kind']) =>
+      this.withRetries<{ message_id: number }>(target.chatId, (id) => {
+        switch (kind) {
+          case 'photo':
+            return bot.api.sendPhoto(id, input(), options);
+          case 'audio':
+            return bot.api.sendAudio(id, input(), options);
+          case 'voice':
+            return bot.api.sendVoice(id, input(), options);
+          case 'video':
+            return bot.api.sendVideo(id, input(), options);
+          default:
+            return bot.api.sendDocument(id, input(), options);
+        }
+      });
+    const kind =
+      file.kind === 'photo' && file.size > 10 * 1024 * 1024
+        ? 'document'
+        : file.kind;
+    try {
+      return { messageId: String((await send(kind)).message_id) };
+    } catch (error) {
+      // Only explicit media rejection is safe to fall back; a network timeout is ambiguous.
+      if (
+        kind !== 'document' &&
+        error instanceof GrammyError &&
+        error.error_code === 400 &&
+        /PHOTO_INVALID|IMAGE_PROCESS_FAILED|wrong (?:file|type)|VOICE_MESSAGES_FORBIDDEN|VIDEO_CONTENT_TYPE_INVALID/i.test(
+          error.description,
+        )
+      ) {
+        return { messageId: String((await send('document')).message_id) };
+      }
+      throw new Error(this.describe(error));
+    }
+  }
+
   /** Downloads a file a message came with; `ref` is its Telegram file ID. */
   async download(ref: string): Promise<Uint8Array> {
+    const folder = await mkdtemp(join(tmpdir(), 'pero-download-'));
+    const path = join(folder, 'file');
+    try {
+      await this.downloadTo(
+        ref,
+        path,
+        this.hostConfig.files().maxMb * 1024 * 1024,
+      );
+      return new Uint8Array(await readFile(path));
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }
+
+  async downloadTo(
+    ref: string,
+    path: string,
+    maxBytes: number,
+    stopped?: AbortSignal,
+  ): Promise<number> {
     const bot = this.connection?.bot;
     if (!bot) throw new Error('Telegram bot token is not set');
     try {
-      const file = await bot.api.getFile(ref);
+      const timeoutMs = this.hostConfig.files().downloadTimeoutSeconds * 1000;
+      const signal = AbortSignal.any([
+        AbortSignal.timeout(timeoutMs),
+        ...(stopped === undefined ? [] : [stopped]),
+      ]);
+      const file = await bot.api.getFile(
+        ref,
+        signal as Parameters<Bot['api']['getFile']>[1],
+      );
       if (file.file_path === undefined) {
         throw new Error('Telegram has no file to download');
       }
+      if ((file.file_size ?? 0) > maxBytes)
+        throw new Error('File exceeds the configured download limit');
+      if (isAbsolute(file.file_path)) {
+        const configured = this.hostConfig.files().telegramLocalFileRoot;
+        if (configured === null || this.apiRoot === DEFAULT_TELEGRAM_API_ROOT)
+          throw new Error(
+            'Local Bot API file paths require files.telegram-local-file-root',
+          );
+        const root = await realpath(resolve(configured));
+        const source = await realpath(file.file_path);
+        const within = relative(root, source);
+        if (within.startsWith('..') || isAbsolute(within))
+          throw new Error('Local Bot API file is outside the configured root');
+        return await saveStream(
+          path,
+          createReadStream(source, { signal }),
+          maxBytes,
+        );
+      }
+      if (
+        file.file_path.split('/').some((part) => part === '..') ||
+        file.file_path.includes('\\')
+      )
+        throw new Error('Invalid Telegram file path');
       const response = await fetch(
         `${this.apiRoot}/file/bot${bot.token}/${file.file_path}`,
-        { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) },
+        { signal, redirect: 'error' },
       );
       if (!response.ok) {
         throw new Error(`Telegram answered ${response.status}`);
       }
-      return new Uint8Array(await response.arrayBuffer());
+      if (Number(response.headers.get('content-length') ?? 0) > maxBytes) {
+        await response.body?.cancel();
+        throw new Error('File exceeds the configured download limit');
+      }
+      return await saveStream(path, responseChunks(response), maxBytes);
     } catch (error) {
       // Never with the bot token, which the file's URL holds.
       throw new Error(
-        error instanceof GrammyError ? error.description : this.describe(error),
+        error instanceof GrammyError &&
+          /file is too big/i.test(error.description)
+          ? 'Telegram cloud downloads are limited to 20 MiB; configure a local Bot API for larger files'
+          : error instanceof GrammyError
+            ? error.description
+            : this.describe(error),
       );
     }
   }
@@ -514,7 +655,12 @@ export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
   }
 
   private connect(token: string): void {
-    const bot = new Bot(token, { client: { apiRoot: this.apiRoot } });
+    const bot = new Bot(token, {
+      client: {
+        apiRoot: this.apiRoot,
+        timeoutSeconds: this.hostConfig.files().uploadTimeoutSeconds,
+      },
+    });
     const abort = new AbortController();
     bot.api.config.use(async (prev, method, payload, signal) => {
       try {
@@ -659,8 +805,17 @@ export class TelegramAdapter implements ChannelAdapter, OnApplicationBootstrap {
     }
     if (!('type' in inbound)) {
       const album = update.message?.media_group_id;
-      if (album === undefined) await handlers.onMessage(inbound);
-      else this.albums.add(album, inbound);
+      if (album === undefined) {
+        const task = handlers
+          .onMessage(inbound)
+          .catch((error: unknown) =>
+            this.logger.warn(
+              `Message processing failed: ${this.describe(error)}`,
+            ),
+          );
+        this.pendingMessages.add(task);
+        void task.finally(() => this.pendingMessages.delete(task));
+      } else this.albums.add(album, inbound);
       return;
     }
     await handlers.onEvent(inbound);

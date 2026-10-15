@@ -15,7 +15,7 @@ import {
 /** How long converting or recording a message may take. */
 const CONVERT_TIMEOUT_MS = 60_000;
 /** How long transcribing may take: whisper.cpp on a small CPU is slow. */
-const TRANSCRIBE_TIMEOUT_MS = 10 * 60_000;
+const TRANSCRIBE_TIMEOUT_MS = 60 * 60_000;
 
 /** The programs the `local` engine runs, by name or path. */
 export interface LocalPrograms {
@@ -88,6 +88,9 @@ export class LocalTranscriber implements Transcriber {
     private readonly model: string,
     /** Such as `en`; null to detect the language. */
     private readonly language: string | null,
+    private readonly timeoutMs: number = TRANSCRIBE_TIMEOUT_MS,
+    private readonly convertTimeoutMs: number = 300_000,
+    private readonly maxDurationS: number = 3600,
   ) {}
 
   async transcribe(file: AudioFile, signal: AbortSignal): Promise<string> {
@@ -100,6 +103,8 @@ export class LocalTranscriber implements Transcriber {
           '-i',
           file.path,
           '-vn',
+          '-t',
+          String(this.maxDurationS + 1),
           '-ar',
           '16000',
           '-ac',
@@ -108,8 +113,14 @@ export class LocalTranscriber implements Transcriber {
           'pcm_s16le',
           wav,
         ],
-        { signal, timeoutMs: CONVERT_TIMEOUT_MS },
+        { signal, timeoutMs: this.convertTimeoutMs },
       );
+      const seconds = await pcmDuration(wav);
+      if (seconds !== null && seconds > this.maxDurationS) {
+        throw new SpeechError(
+          `it is longer than ${Math.round(this.maxDurationS / 60)} minutes`,
+        );
+      }
       const printed = await runProgram(
         this.programs.whisper,
         [
@@ -122,10 +133,45 @@ export class LocalTranscriber implements Transcriber {
           '--no-timestamps',
           '--no-prints',
         ],
-        { signal, timeoutMs: TRANSCRIBE_TIMEOUT_MS },
+        { signal, timeoutMs: this.timeoutMs },
       );
       return whisperText(printed);
     });
+  }
+}
+
+/** Read only the WAV header, not hours of PCM audio into memory. */
+async function pcmDuration(path: string): Promise<number | null> {
+  const { open } = await import('node:fs/promises');
+  const file = await open(path, 'r');
+  try {
+    const header = Buffer.alloc(4096);
+    const { bytesRead } = await file.read(header, 0, header.length, 0);
+    const data = header.subarray(0, bytesRead);
+    if (
+      data.toString('ascii', 0, 4) !== 'RIFF' ||
+      data.toString('ascii', 8, 12) !== 'WAVE'
+    )
+      return null;
+    let byteRate = 0;
+    for (let offset = 12; offset + 8 <= bytesRead;) {
+      const size = data.readUInt32LE(offset + 4);
+      if (
+        data.toString('ascii', offset, offset + 4) === 'fmt ' &&
+        offset + 20 <= bytesRead
+      )
+        byteRate = data.readUInt32LE(offset + 16);
+      if (
+        data.toString('ascii', offset, offset + 4) === 'data' &&
+        byteRate > 0
+      ) {
+        return Math.max(0, ((await file.stat()).size - offset - 8) / byteRate);
+      }
+      offset += 8 + size + (size % 2);
+    }
+    return null;
+  } finally {
+    await file.close();
   }
 }
 

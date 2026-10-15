@@ -15,6 +15,7 @@ import {
 } from '../../config/provider-options.js';
 import type { ChannelNoteView } from '../../control/protocol.js';
 import { ComponentHealth } from '../../health/component-health.js';
+import { HostConfigService } from '../../host-config/host-config.service.js';
 import { MessageHistory } from '../../history/message-history.service.js';
 import { Channel } from '../../persistence/entities/channel.entity.js';
 import { Message } from '../../persistence/entities/message.entity.js';
@@ -87,6 +88,7 @@ export class ChannelCommands {
     private readonly notes: SystemNotes,
     private readonly channelNotes: ChannelNotes,
     private readonly workflows: WorkflowCommands,
+    private readonly hostConfig: HostConfigService,
   ) {}
 
   /** Answers `command`, typed in `channel`, which `route` answers now. */
@@ -146,6 +148,26 @@ export class ChannelCommands {
   ): Promise<Answer> {
     try {
       switch (command.name) {
+        case 'files': {
+          const files = this.hostConfig.files();
+          const speech = this.hostConfig.speech().transcribe;
+          return {
+            screen: {
+              text: [
+                `File limit: ${files.maxMb} MiB.`,
+                files.telegramApiRoot === null
+                  ? 'Telegram cloud: download up to 20 MiB; upload up to 50 MiB. Larger files need a local Bot API.'
+                  : 'Custom Telegram Bot API configured; the server also enforces its own transport limits.',
+                `Download: ${files.downloadTimeoutSeconds} s; upload: ${files.uploadTimeoutSeconds} s.`,
+                `Audio duration: ${speech.maxMinutes} min; transcription budget: ${speech.timeoutSeconds} s; conversion: ${speech.convertTimeoutSeconds} s.`,
+                `Design previews: ${files.previews ? 'enabled (requires Chromium)' : 'off'}.`,
+                'Ask Pero to send a result file; images, playable audio and documents appear in this topic.',
+                'Sizes and elapsed time are recorded privately in .pero/file-events.jsonl.',
+              ].join('\n'),
+            },
+            notice: null,
+          };
+        }
         case 'topic_confirm': {
           const [id, decision, extra] = command.args.split(' ');
           if (

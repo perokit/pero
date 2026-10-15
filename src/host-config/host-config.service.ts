@@ -7,6 +7,8 @@ import {
   allowChat,
   DEFAULT_DATA_FOLDER,
   DEFAULT_SPEECH,
+  DEFAULT_FILES,
+  type FilesConfig,
   defaultHostConfig,
   denyChat,
   editHostConfig,
@@ -58,6 +60,7 @@ export class HostConfigService implements OnModuleInit {
     system: null,
     allowedChats: [],
     speech: DEFAULT_SPEECH,
+    files: DEFAULT_FILES,
   };
   /** `data` and `system` as Pero uses them: from startup, or set by Pero. */
   private running: Pick<HostConfig, 'data' | 'system'> = {
@@ -171,6 +174,10 @@ export class HostConfigService implements OnModuleInit {
   /** `speech`, as last read; an edit applies from the next voice message. */
   speech(): SpeechConfig {
     return this.config.speech;
+  }
+
+  files(): FilesConfig {
+    return this.config.files;
   }
 
   /** Adds chat `chatKey`, labelled `title`; false when it was allowed. */

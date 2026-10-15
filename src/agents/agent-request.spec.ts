@@ -5,6 +5,7 @@ import {
   FORMAT_NOTE,
   VOICE_NOTE,
   TOPIC_NOTE,
+  FILE_NOTE,
   agentRequest,
   composeInstructions,
   dataFolderNote,
@@ -34,7 +35,7 @@ describe('composeInstructions', () => {
       ),
     ).toBe(`${CONTEXT}\n\nBe calm.\n\nAnswer in English.\n\nTrack spending.`);
     expect(CONTEXT).toBe(
-      `${dataFolderNote('/ws/data')}\n\n${systemFolderNote(HEALTH, FOLDERS)}\n\n${FORMAT_NOTE}\n\n${TOPIC_NOTE}`,
+      `${dataFolderNote('/ws/data')}\n\n${systemFolderNote(HEALTH, FOLDERS)}\n\n${FORMAT_NOTE}\n\n${TOPIC_NOTE}\n\n${FILE_NOTE}`,
     );
   });
 

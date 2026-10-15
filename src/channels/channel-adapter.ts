@@ -1,4 +1,5 @@
 import type { ChatKind, IntegrationKind } from '../persistence/entities/sql.js';
+import type { Readable } from 'node:stream';
 
 /*
  * The contract between the Channel router and a communication integration.
@@ -181,6 +182,15 @@ export interface OutboundVoice {
   durationS: number | null;
 }
 
+/** A generated result streamed to its originating chat. */
+export interface OutboundFile {
+  source: () => Readable;
+  name: string;
+  size: number;
+  kind: 'photo' | 'audio' | 'video' | 'voice' | 'document';
+  caption: string;
+}
+
 /**
  * The integration's ID for a message it sent; the first part's ID when it
  * had to split the message into several.
@@ -221,6 +231,14 @@ export interface ChannelAdapter {
   chatKey(address: ChannelAddress): string;
   /** The contents of a file a message came with, by its `ref`. */
   download(ref: string): Promise<Uint8Array>;
+  /** Large transfers avoid buffering the entire file in the daemon. */
+  downloadTo?(
+    ref: string,
+    path: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<number>;
+  sendFile?(address: ChannelAddress, file: OutboundFile): Promise<SentMessage>;
   /**
    * Replaces a sent message's text and buttons; a message without buttons
    * removes them. The text must fit in one message.

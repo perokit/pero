@@ -1,6 +1,6 @@
 {
   "name": "@perokit/pero",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Open-source Personal Agent Runtime for running an always-on AI assistant on your VPS.",
   "license": "MIT",
   "repository": {
@@ -63,6 +63,7 @@
     "grammy": "1.46.0",
     "nest-commander": "3.21.0",
     "pino": "10.3.1",
+    "playwright": "1.64.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "tar": "7.5.22",

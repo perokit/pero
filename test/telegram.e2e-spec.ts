@@ -24,11 +24,15 @@ import {
 } from '../src/control/client.js';
 import { type Daemon, startDaemon } from '../src/daemon/daemon.js';
 import { Channel } from '../src/persistence/entities/channel.entity.js';
+import { ChannelSender } from '../src/channels/channel-sender.js';
+import { TelegramAdapter } from '../src/telegram/telegram-adapter.js';
+import { SpeechService } from '../src/speech/speech.service.js';
 import { Session } from '../src/persistence/entities/session.entity.js';
 import {
   FakeBotApi,
   type UpdateBody,
 } from '../src/telegram/testing/fake-bot-api.js';
+import { readFile } from 'node:fs/promises';
 
 const TOKEN = '123456789:AAEhBOweik6ad9r_QXMENQjcrGbqCr4K-bs';
 
@@ -65,6 +69,56 @@ describe('Telegram chats and pairing (e2e)', () => {
     nextMessageId = 1;
   });
 
+  it('delivers generated audio, images and documents to their topic over multipart HTTP', async () => {
+    await start();
+    writeFileSync(join(workspace, 'song.mp3'), 'audio-content');
+    writeFileSync(join(workspace, 'design.png'), 'image-content');
+    writeFileSync(join(workspace, 'report.pdf'), 'document-content');
+    const target = { chatId: String(FORUM.id), messageThreadId: '42' };
+    const sender = daemon!.app.get(ChannelSender);
+    await sender.sendAnswer(
+      'telegram',
+      target,
+      'Ready\n<file>song.mp3</file>\n<file>design.png</file>\n<file>report.pdf</file>',
+    );
+    for (const [method, field, expected] of [
+      ['sendAudio', 'audio', 'audio-content'],
+      ['sendPhoto', 'photo', 'image-content'],
+      ['sendDocument', 'document', 'document-content'],
+    ]) {
+      const payload = api.callsOf(method!)[0]!.payload;
+      expect(String(payload.message_thread_id)).toBe('42');
+      expect(String(payload.chat_id)).toBe(String(FORUM.id));
+      const file = payload[field!] as { bytes: Uint8Array };
+      expect(Buffer.from(file.bytes).toString()).toBe(expected);
+    }
+    api.failNext('sendPhoto', {
+      error_code: 400,
+      description: 'Bad Request: IMAGE_PROCESS_FAILED',
+    });
+    await sender.sendAnswer('telegram', target, '<file>design.png</file>');
+    expect(api.callsOf('sendDocument')).toHaveLength(2);
+  });
+
+  it('streams a ZIP larger than the cloud limit through a custom Bot API with actual-byte enforcement', async () => {
+    await start();
+    const bytes = new Uint8Array(22 * 1024 * 1024).fill(7);
+    api.files.set('large-zip', bytes);
+    const adapter = daemon!.app.get(TelegramAdapter);
+    const file = join(tmp, 'archive.zip');
+    expect(await adapter.downloadTo('large-zip', file, bytes.length)).toBe(
+      bytes.length,
+    );
+    expect((await readFile(file)).length).toBe(bytes.length);
+    await expect(
+      adapter.downloadTo(
+        'large-zip',
+        join(tmp, 'too-large.zip'),
+        bytes.length - 1,
+      ),
+    ).rejects.toThrow(/limit/);
+  });
+
   afterEach(async () => {
     await daemon?.stop('test finished');
     daemon = undefined;
@@ -73,17 +127,95 @@ describe('Telegram chats and pairing (e2e)', () => {
   });
 
   /** A daemon on the fake Bot API whose turns answer with an echo. */
-  async function start() {
+  async function start(overrideApi = true) {
     daemon = await startDaemon({
       config: resolveBootstrapConfig({ workspace, env: {} }),
       foreground: false,
-      env: { PERO_TELEGRAM_API_ROOT: api.url, PERO_FAKE_RUNTIME: 'echo' },
+      env: {
+        ...(overrideApi ? { PERO_TELEGRAM_API_ROOT: api.url } : {}),
+        PERO_FAKE_RUNTIME: 'echo',
+      },
     });
     await client.call('telegram.token', { token: TOKEN });
     await vi.waitFor(async () =>
       expect((await client.call('telegram.chats')).bot).toBe('pero_test_bot'),
     );
   }
+
+  it('loads a custom endpoint at bootstrap and restricts absolute local Bot API paths', async () => {
+    writeFileSync(
+      join(workspace, '.pero/config.yaml'),
+      `files:\n  telegram-api-root: ${api.url}\n  telegram-local-file-root: ${workspace}\n`,
+    );
+    await start(false);
+    const inside = join(workspace, 'uploaded.zip');
+    const outside = join(tmp, 'outside.zip');
+    writeFileSync(inside, 'allowed');
+    writeFileSync(outside, 'refused');
+    api.files.set('inside', new Uint8Array(7));
+    api.files.set('outside', new Uint8Array(7));
+    api.filePaths.set('inside', inside);
+    api.filePaths.set('outside', outside);
+    const adapter = daemon!.app.get(TelegramAdapter);
+    expect(
+      await adapter.downloadTo('inside', join(tmp, 'saved.zip'), 100),
+    ).toBe(7);
+    await expect(
+      adapter.downloadTo('outside', join(tmp, 'refused.zip'), 100),
+    ).rejects.toThrow(/outside/);
+  });
+
+  it('continues polling for commands while a recording is processing and cancels it with /stop', async () => {
+    await start();
+    await client.call('telegram.allow', { chatId: String(FORUM.id) });
+    api.push(message(FORUM, 'Initialize'));
+    await sentTexts(2);
+    const speech = daemon!.app.get(SpeechService);
+    const transcribe = vi.spyOn(speech, 'transcribe').mockImplementation(
+      (_file, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => reject(new Error('was stopped')),
+            { once: true },
+          );
+        }),
+    );
+    api.files.set('long-audio', new Uint8Array([1]));
+    api.push({
+      message: {
+        message_id: nextMessageId++,
+        date: 0,
+        chat: FORUM,
+        from: OWNER,
+        audio: {
+          file_id: 'long-audio',
+          file_unique_id: 'unique',
+          duration: 300,
+          file_size: 1,
+          mime_type: 'audio/mpeg',
+          file_name: 'long.mp3',
+        },
+      },
+    });
+    try {
+      await vi.waitFor(() => expect(transcribe).toHaveBeenCalledOnce());
+      api.push(command(FORUM, '/files'));
+      await vi.waitFor(() =>
+        expect(
+          api.sent().some((p) => String(p.text).startsWith('File limit:')),
+        ).toBe(true),
+      );
+      api.push(command(FORUM, '/stop'));
+      await vi.waitFor(() =>
+        expect(transcribe.mock.calls[0]![1]?.aborted).toBe(true),
+      );
+    } finally {
+      await daemon!.stop('cancel recording');
+      daemon = undefined;
+      transcribe.mockRestore();
+    }
+  });
 
   /** The Channel notes, by file name. */
   function channelNotes(): string[] {

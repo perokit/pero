@@ -103,7 +103,12 @@ export class AgentChannelTurns extends ChannelTurns {
     }
     try {
       await (author.origin === 'agent'
-        ? this.sender.postAnswer(channel, text, author)
+        ? this.sender.postAnswer(
+            channel,
+            text,
+            author,
+            channel.note.workingDirectory,
+          )
         : this.sender.post(channel, text, author));
     } catch (error) {
       this.logger.warn(
