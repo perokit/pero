@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
@@ -797,6 +797,42 @@ describe('Workflow Runs and the executor', () => {
       ]);
     });
 
+    it('notifies no one of a run whose script found no data', async () => {
+      await ws.workflow('alerts', { script: 'echo NO_DATA' }, 'Summarize.');
+      await target('alerts');
+
+      const { id } = await runs.start('alerts');
+      await executor.idle();
+
+      expect(await run(id)).toMatchObject({
+        status: 'completed',
+        result: 'NO_DATA',
+      });
+      expect(await notificationsOf(id)).toEqual([]);
+    });
+
+    it("notifies the answer to its script's output, and a script that failed", async () => {
+      await ws.workflow('alerts', { script: 'echo disk full' }, 'Summarize.');
+      await ws.workflow(
+        'broken',
+        { script: 'echo nope >&2; exit 3' },
+        'Summarize.',
+      );
+      await target('alerts', '1234');
+      await target('broken', '-100777');
+
+      const answered = await runs.start('alerts');
+      const failed = await runs.start('broken');
+      await executor.idle();
+
+      expect(texts(await notificationsOf(answered.id))).toEqual([
+        'alerts\n\necho: Summarize.\n\n[Script output]\ndisk full\n[End of script output]',
+      ]);
+      expect(texts(await notificationsOf(failed.id))).toEqual([
+        `Run ${failed.id} of Workflow broken failed: script failed: nope`,
+      ]);
+    });
+
     it('commits the final status and the Notifications together', async () => {
       await manualWorkflow('brief');
       await target('brief');
@@ -1483,6 +1519,115 @@ describe('Workflow Runs and the executor', () => {
       await expect(runs.list({ workflow: 'nope', limit: 20 })).rejects.toThrow(
         NotFoundError,
       );
+    });
+  });
+
+  describe('scripts', () => {
+    /** Settles once run `id` is running. */
+    async function running(id: number): Promise<void> {
+      while ((await run(id)).status !== 'running') await tick();
+    }
+
+    it("sends its script's output in place of {{script}}, and records it", async () => {
+      await ws.workflow(
+        'alerts',
+        { script: 'printf "one\\ntwo\\n"' },
+        'New alerts:\n\n{{script}}\n\nSummarize them.',
+      );
+
+      const { id } = await runs.start('alerts');
+      await executor.idle();
+
+      const input =
+        'New alerts:\n\n[Script output]\none\ntwo\n[End of script output]\n\nSummarize them.';
+      expect(claude.requests).toHaveLength(1);
+      expect(claude.requests[0]!.input).toBe(input);
+      expect(await run(id)).toMatchObject({
+        status: 'completed',
+        result: `echo: ${input}`,
+      });
+      const saved = await ds.getRepository(WorkflowRun).findOneByOrFail({ id });
+      expect(saved.executionConfig).toMatchObject({
+        script: 'printf "one\\ntwo\\n"',
+        input,
+      });
+    });
+
+    it('runs it in the working directory, naming the Workflow and run', async () => {
+      await ws.workflow(
+        'where',
+        { script: 'echo "$PWD $PERO_WORKFLOW $PERO_RUN_ID"' },
+        'Where?',
+      );
+
+      const { id } = await runs.start('where');
+      await executor.idle();
+
+      expect(claude.requests[0]!.input).toContain(
+        `${realpathSync(workspace)} where ${id}\n`,
+      );
+    });
+
+    it('completes a run without a turn when its script finds no data', async () => {
+      await ws.workflow('alerts', { script: 'echo "  NO_DATA  "' });
+
+      const { id } = await runs.start('alerts');
+      await executor.idle();
+
+      expect(await run(id)).toMatchObject({
+        status: 'completed',
+        result: 'NO_DATA',
+        error: null,
+      });
+      expect(claude.requests).toEqual([]);
+    });
+
+    it('fails a run whose script fails, without a turn', async () => {
+      await ws.workflow('alerts', { script: 'echo boom >&2; exit 2' });
+      await ws.workflow('missing', { script: 'no-such-command-pero' });
+
+      const failed = await runs.start('alerts');
+      const missing = await runs.start('missing');
+      await executor.idle();
+
+      expect(await run(failed.id)).toMatchObject({
+        status: 'failed',
+        result: null,
+        error: 'script failed: boom',
+      });
+      expect((await run(missing.id)).error).toMatch(
+        /^script failed: .*no-such-command-pero/,
+      );
+      expect(claude.requests).toEqual([]);
+    });
+
+    it('stops a script when the run is cancelled', async () => {
+      await ws.workflow('slow', { script: 'sleep 30' });
+      const { id } = await runs.start('slow');
+      await running(id);
+
+      await runs.cancel(id);
+      await executor.idle();
+
+      expect(await run(id)).toMatchObject({
+        status: 'cancelled',
+        error: CANCELLED,
+      });
+      expect(claude.requests).toEqual([]);
+    });
+
+    it('stops a script when Pero stops, leaving the run for the next start', async () => {
+      await ws.workflow('slow', { script: 'sleep 30' });
+      const { id } = await runs.start('slow');
+      await running(id);
+
+      await executor.beforeApplicationShutdown();
+
+      expect(await run(id)).toMatchObject({ status: 'running', error: null });
+      await moduleRef.close();
+      await boot();
+      expect(await run(id)).toMatchObject({ status: 'interrupted' });
+      expect(claude.requests).toEqual([]);
     });
   });
 

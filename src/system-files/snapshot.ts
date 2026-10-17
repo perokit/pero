@@ -96,6 +96,8 @@ export interface Workflow {
   /** How many times a run of it may start in all. */
   maxAttempts: number;
   enabled: boolean;
+  /** The command each run runs before its turn; null runs none. */
+  script: string | null;
   /** What each run sends. */
   input: string;
 }
@@ -738,6 +740,7 @@ class WorkflowResolver {
             },
       maxAttempts: note.maxAttempts,
       enabled: note.enabled,
+      script: note.script,
       input: note.input,
     };
   }

@@ -96,6 +96,7 @@ describe('WorkflowViews', () => {
       inputTemplate: 'Write the weekly report.',
       enabled: true,
       maxAttempts: 1,
+      script: null,
       schedule: {
         cron: '0 12 * * 0',
         timezone: 'Europe/Berlin',

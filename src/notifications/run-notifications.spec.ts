@@ -49,6 +49,12 @@ describe('notificationText', () => {
     ).toBe('Evening English\n\nNO_REPLY: breakfast is logged');
   });
 
+  it('posts nothing for a run whose script found no data', () => {
+    expect(
+      notificationText(run({ result: { text: 'NO_DATA' } }), english, false),
+    ).toBeNull();
+  });
+
   it('posts why a run failed, or was interrupted and not retried', () => {
     expect(
       notificationText(

@@ -125,6 +125,7 @@ Claude efforts are `low`, `medium`, `high`, `xhigh`, and `max`; Codex efforts ar
 | `history-hours`    | 1–720                                                                     | since the last successful run | A fixed window instead                                              |
 | `max-attempts`     | 1–10                                                                      | 1                             | Times a run may start, counting restarts after Pero stopped mid-run |
 | `enabled`          | `true`, `false`                                                           | `true`                        | `false` stops its schedule; it can still run by hand                |
+| `script`           | shell command, such as `tsx scripts/check.ts`                             | none                          | Runs before each turn; just `NO_DATA` ends the run without one      |
 
 One schedule per Workflow; for two different schedules, write two notes. Examples:
 

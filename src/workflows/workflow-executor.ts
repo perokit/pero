@@ -28,6 +28,14 @@ import { finishRun } from './finish-run.js';
 import { readHistoryWindow } from './history-window.js';
 import { queueRetryWithin } from './retry-run.js';
 import { isScheduled } from './run-keys.js';
+import {
+  isNoData,
+  NO_DATA,
+  renderScriptInput,
+  runScript,
+  SCRIPT_TIMEOUT_MS,
+  ScriptError,
+} from './run-script.js';
 
 /** A run the executor has claimed and marked `running`. */
 interface ClaimedRun {
@@ -81,6 +89,8 @@ export class WorkflowExecutor
   /** A pass that has not begun yet, which later wakes share. */
   private queued: Promise<void> | null = null;
   private stopping = false;
+  /** Stops every script still running once Pero is stopping. */
+  private readonly stopScripts = new AbortController();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -229,10 +239,12 @@ export class WorkflowExecutor
 
   /**
    * Stops claiming runs, then lets running ones finish until the Agent
-   * shutdown timeout aborts them, and records how each ended.
+   * shutdown timeout aborts them, and records how each ended. Scripts are
+   * stopped at once: a run's next attempt runs its script again.
    */
   async beforeApplicationShutdown(): Promise<void> {
     this.stopping = true;
+    this.stopScripts.abort();
     await this.pass;
     await this.agentManager.drain();
     await Promise.all(this.active.values());
@@ -311,6 +323,7 @@ export class WorkflowExecutor
         this.agentManager.instructionDefaults(),
         history?.input ?? workflow.input,
         history?.read,
+        workflow.script,
       );
       await runs.update(run.id, {
         status: 'running',
@@ -352,30 +365,57 @@ export class WorkflowExecutor
     const { runId, workflow, snapshot } = claimed;
     const label = `Workflow ${workflow}, run ${runId}`;
     this.logger.log(`Run ${runId} of Workflow ${workflow} started`);
+    let input = snapshot.input;
     let outcome: Outcome;
     try {
-      const { text, providerSessionId } = await this.agentManager.runIsolated({
-        note: snapshot.agentName,
-        provider: snapshot.provider,
-        request: snapshotRequest(snapshot),
-        input: snapshot.input,
-        label,
-        signal,
-      });
-      outcome = { status: 'completed', text, providerSessionId };
+      const output =
+        snapshot.script === undefined
+          ? null
+          : await runScript(snapshot.script, {
+              cwd: snapshot.workingDirectory,
+              env: { PERO_WORKFLOW: workflow, PERO_RUN_ID: String(runId) },
+              signal: AbortSignal.any([signal, this.stopScripts.signal]),
+              timeoutMs: SCRIPT_TIMEOUT_MS,
+            });
+      if (output !== null && isNoData(output)) {
+        this.logger.log(
+          `Run ${runId} of Workflow ${workflow}: its script found no data; no turn`,
+        );
+        outcome = {
+          status: 'completed',
+          text: NO_DATA,
+          providerSessionId: null,
+        };
+      } else {
+        if (output !== null) input = renderScriptInput(input, output);
+        const { text, providerSessionId } = await this.agentManager.runIsolated(
+          {
+            note: snapshot.agentName,
+            provider: snapshot.provider,
+            request: snapshotRequest(snapshot),
+            input,
+            label,
+            signal,
+          },
+        );
+        outcome = { status: 'completed', text, providerSessionId };
+      }
     } catch (error) {
-      if (!(error instanceof TurnError)) {
+      if (error instanceof ScriptError) {
+        if (!error.aborted) this.logger.warn(`${label}: ${error.message}`);
+      } else if (!(error instanceof TurnError)) {
         this.logger.error(`${label} failed: ${describe(error)}`);
       }
       // The owner's cancel wins over Pero stopping at the same time.
       outcome = this.cancelRequested.has(runId)
         ? { status: 'cancelled', error: CANCELLED }
-        : error instanceof TurnError && error.interrupted
+        : (error instanceof TurnError && error.interrupted) ||
+            (error instanceof ScriptError && error.aborted)
           ? { status: 'left' }
           : {
               status: 'failed',
               error:
-                error instanceof TurnError
+                error instanceof TurnError || error instanceof ScriptError
                   ? error.message
                   : 'Pero failed to run it; see pero logs',
             };
@@ -390,6 +430,10 @@ export class WorkflowExecutor
       // The Channels the Workflow notifies now, not when the run started.
       finishRun(manager, runId, this.definitions.workflow(workflow), {
         status: outcome.status,
+        // What the turn was sent, with the script's output.
+        ...(input === snapshot.input
+          ? {}
+          : { executionConfig: { ...snapshot, input } }),
         ...(outcome.status === 'completed'
           ? {
               result: {

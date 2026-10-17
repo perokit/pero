@@ -237,6 +237,7 @@ describe('Definitions', () => {
       maxAttempts: 2,
       schedule: { cron: '0 12 * * 0', timezone: 'Europe/Berlin' },
       enabled: true,
+      script: null,
     });
     expect(definitions.workflow('brief')).toMatchObject({
       note: 'default',

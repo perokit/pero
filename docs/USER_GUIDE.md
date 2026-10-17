@@ -260,6 +260,23 @@ channel: English
 Suggest better English for: {{history}}
 ```
 
+### Script triggers
+
+A Workflow with `script` runs that command first on each run, so a cheap check decides whether Pero is needed. A script that prints just `NO_DATA` ends the run there: no turn, no notification. Anything else it prints goes into the input, in place of `{{script}}` or after it, and the run goes on with Pero's answer posted to `channel`. A script that fails, or runs longer than 5 minutes, fails the run, and its error is posted instead.
+
+```markdown
+---
+cron: "*/15 * * * *"
+channel: General
+script: tsx scripts/check.ts
+---
+Summarise these new alerts and say what to do first:
+
+{{script}}
+```
+
+The command runs through the shell in the run's working directory, with `PERO_WORKFLOW` and `PERO_RUN_ID` set; the [configuration reference](./CONFIGURATION.md#workflow-notes) has the details.
+
 ### Notifications
 
 Each Channel a Workflow's `channel` names gets a Notification of each run that finishes, holding the run's answer under the Workflow's title, or why the run failed; an interrupted run that is retried leaves none, and its retry does. Cancelled runs notify no one, and neither does a run whose whole answer is `NO_REPLY`. That lets a check stay quiet when all is well:

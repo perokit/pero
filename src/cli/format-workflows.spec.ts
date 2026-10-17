@@ -34,6 +34,7 @@ const review: WorkflowView = {
   inputTemplate: "Review today's chats.\nSuggest one improvement.",
   enabled: true,
   maxAttempts: 1,
+  script: null,
   schedule: {
     cron: '0 21 * * *',
     timezone: 'Europe/Berlin',
@@ -119,6 +120,15 @@ describe('Workflow formatting', () => {
         '  5   telegram -100777:7  English',
         '  9   telegram 1234       —',
       ].join('\n'),
+    );
+  });
+
+  it('shows the script a Workflow runs first', () => {
+    expect(
+      formatWorkflowDetails({ ...review, script: 'tsx scripts/check.ts' }),
+    ).toContain(
+      "  input         Review today's chats. (2 lines)\n" +
+        '  script        tsx scripts/check.ts (NO_DATA skips the turn)\n',
     );
   });
 

@@ -157,6 +157,33 @@ describe('ScheduleTick', () => {
     });
   });
 
+  it("runs a scheduled Workflow's script first, with no turn when it finds no data", async () => {
+    await scheduled('alerts', '2026-09-28T10:00:00Z');
+    await ws.editWorkflow('alerts', { script: 'echo NO_DATA' });
+
+    await scheduler.tick(new Date('2026-09-28T10:00:04Z'));
+    await executor.idle();
+    await ws.editWorkflow('alerts', { script: 'echo one alert' });
+    await scheduler.tick(new Date('2026-09-28T11:00:04Z'));
+    await executor.idle();
+
+    expect(
+      (await allRuns()).map(({ status, result }) => ({ status, result })),
+    ).toEqual([
+      { status: 'completed', result: { text: 'NO_DATA' } },
+      {
+        status: 'completed',
+        result: expect.objectContaining({
+          text: 'echo: Run alerts.\n\n[Script output]\none alert\n[End of script output]',
+        }),
+      },
+    ]);
+    expect(claude.requests).toHaveLength(1);
+    expect(await state('alerts')).toMatchObject({
+      nextRunAt: new Date('2026-09-28T12:00:00Z'),
+    });
+  });
+
   it('creates one run per time however often it polls', async () => {
     await scheduled('brief', '2026-09-28T10:00:00Z');
 
