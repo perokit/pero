@@ -1,6 +1,6 @@
 {
   "name": "@perokit/pero",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "Open-source Personal Agent Runtime for running an always-on AI assistant on your VPS.",
   "license": "MIT",
   "repository": {

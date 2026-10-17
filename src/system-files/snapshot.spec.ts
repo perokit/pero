@@ -117,6 +117,7 @@ You are my health coach.`,
       resolved: null,
       maxAttempts: 1,
       enabled: true,
+      script: null,
       input: 'Create a weekly report.',
     });
   });

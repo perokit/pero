@@ -56,23 +56,30 @@ export const executionSnapshotSchema = z.object({
   toolPolicy: toolPolicySchema,
   /** Lets Codex work in a folder that is not a Git repository. */
   skipGitRepoCheck: z.boolean(),
-  /** What the run sends, with any history already rendered. */
+  /**
+   * What the run sends, with any history already rendered, and once it
+   * has run, its script's output too.
+   */
   input: z.string(),
   /** The Channel history the input carries; absent when it reads none. */
   history: historyReadSchema.optional(),
+  /** The command the run runs before its turn; absent when none. */
+  script: z.string().optional(),
 });
 
 export type ExecutionSnapshot = z.infer<typeof executionSnapshotSchema>;
 
 /**
  * The snapshot of `agent`'s settings, the Channel note a run uses, with
- * the shared instructions composed in, and of `input` and its `history`.
+ * the shared instructions composed in, and of `input`, its `history`, and
+ * the `script` that runs first.
  */
 export function executionSnapshot(
   agent: ChannelNote,
   defaults: InstructionDefaults,
   input: string,
   history?: HistoryRead,
+  script?: string | null,
 ): ExecutionSnapshot {
   return {
     agentName: agent.name,
@@ -80,6 +87,7 @@ export function executionSnapshot(
     ...agentRequest(agent, defaults),
     input,
     ...(history === undefined ? {} : { history }),
+    ...(script === undefined || script === null ? {} : { script }),
   };
 }
 

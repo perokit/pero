@@ -288,6 +288,7 @@ Create a weekly report in the Reports folder from Health/Log.md…
 | `history-hours` | 1–720 | since the last successful run | A fixed window instead |
 | `max-attempts` | 1–10 | 1 | Times a run may start, counting restarts after Pero stopped mid-run |
 | `enabled` | `true`, `false` | `true` | `false` stops its schedule, which it keeps; it can still be run by hand |
+| `script` | shell command, such as `tsx scripts/check.ts` | none | Runs first on each run; just `NO_DATA` ends the run without a turn, anything else goes into the input |
 
 A Workflow has at most one schedule. Any Workflow can be run by hand with `pero workflows run <name>`, with a schedule or without.
 
@@ -302,6 +303,24 @@ A Workflow has at most one schedule. Any Workflow can be run by hand with `pero 
 - **A Channel ID** from `pero channels`, such as `5`, for a direct chat.
 
 A Channel Pero hasn't seen yet has no known address: write something in it first. Until then, the Workflow is left out, and `pero status` and `pero check` report it. Without Pero running, `pero check` checks note names against the notes and leaves the rest for when it runs.
+
+**Script triggers:** with `script`, each run, scheduled, by hand, or a retry, first runs that command through the shell, so a cheap check decides whether the agent is needed:
+
+```markdown
+---
+cron: "*/15 * * * *"
+channel: General
+script: tsx scripts/check.ts
+---
+Summarise these new alerts and say what to do first:
+
+{{script}}
+```
+
+- **Just `NO_DATA`** on standard output, surrounding whitespace aside: the run completes with `NO_DATA` as its result, with no turn and no notification.
+- **Anything else:** the output replaces `{{script}}` in the body, or follows it after a blank line when there is none, between `[Script output]` and `[End of script output]`, at most 50,000 characters of it. The run then goes on as any other, and its answer is posted to `channel`.
+- **A failure**, a non-zero exit or more than 5 minutes, fails the run with the last line the script wrote to standard error, and that is posted to `channel`. `max-attempts` doesn't retry it.
+- It runs in the run's working directory, the `working-directory` of its note, with Pero's environment plus `PERO_WORKFLOW` (the Workflow's name) and `PERO_RUN_ID`. Cancelling the run, or Pero stopping, stops it and anything it started.
 
 ## Validation
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Notification } from '../persistence/entities/notification.entity.js';
 import type { WorkflowRun } from '../persistence/entities/workflow-run.entity.js';
 import type { ResolvedWorkflow } from '../system-files/snapshot.js';
+import { NO_DATA } from '../workflows/run-script.js';
 
 /** What a Notification delivers: the rendered message. */
 export const notificationPayloadSchema = z.object({ text: z.string().min(1) });
@@ -19,8 +20,8 @@ export const SILENT_ANSWER = 'NO_REPLY';
  * What a finished run tells the Channels its Workflow notifies: the
  * answer, headed by the Workflow's title, or why the run
  * failed. Null for a run that tells them nothing: one the owner cancelled,
- * one that answered just `NO_REPLY`, and an interrupted one that is
- * retried, whose retry tells them instead.
+ * one that answered just `NO_REPLY`, one whose script found no data, and
+ * an interrupted one that is retried, whose retry tells them instead.
  */
 export function notificationText(
   run: Pick<WorkflowRun, 'id' | 'status' | 'result' | 'errorText'>,
@@ -34,7 +35,9 @@ export function notificationText(
       if (typeof text !== 'string' || text.trim() === '') {
         return `${label} completed without an answer`;
       }
-      if (text.trim() === SILENT_ANSWER) return null;
+      if (text.trim() === SILENT_ANSWER || text.trim() === NO_DATA) {
+        return null;
+      }
       return `${workflow.title}\n\n${text}`;
     }
     case 'failed':

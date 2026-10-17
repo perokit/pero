@@ -108,6 +108,7 @@ export class WorkflowViews {
       inputTemplate: workflow.input,
       enabled: workflow.enabled,
       maxAttempts: workflow.maxAttempts,
+      script: workflow.script,
       schedule: scheduleView(workflow, states),
       channels: named(resolved.targets),
       history:

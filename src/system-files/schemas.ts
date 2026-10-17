@@ -109,6 +109,11 @@ export interface WorkflowNote {
   history: WorkflowNoteHistory | null;
   maxAttempts: number;
   enabled: boolean;
+  /**
+   * The command each run runs first, through the shell; null runs none.
+   * When it prints just `NO_DATA`, the run ends without a turn.
+   */
+  script: string | null;
   /** The body: what each run sends. */
   input: string;
 }
@@ -299,6 +304,7 @@ const workflowProperties = z
     'history-hours': wholeNumber(1, MAX_HISTORY_HOURS),
     'max-attempts': workflowMaxAttemptsSchema,
     enabled: bool,
+    script: text,
   })
   .partial();
 
@@ -431,6 +437,7 @@ export function readWorkflowNote(
         : null,
       maxAttempts: p['max-attempts'] ?? 1,
       enabled: p.enabled ?? true,
+      script: p.script ?? null,
       input: note.body,
     },
   };

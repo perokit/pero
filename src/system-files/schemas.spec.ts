@@ -289,6 +289,7 @@ describe('readWorkflowNote', () => {
       history: null,
       maxAttempts: 1,
       enabled: true,
+      script: null,
       input: 'Do the thing',
     });
   });
@@ -310,6 +311,7 @@ describe('readWorkflowNote', () => {
       history: null,
       maxAttempts: 1,
       enabled: true,
+      script: null,
       input: '# Workflow Instruction\nCreate a weekly report…',
     });
   });
@@ -390,6 +392,15 @@ describe('readWorkflowNote', () => {
       read({ history: false, 'history-hours': 24, 'history-channels': 'X' })
         .history,
     ).toBeNull();
+  });
+
+  it('reads the script each run runs first', () => {
+    expect(read({ script: '  tsx scripts/check.ts ' }).script).toBe(
+      'tsx scripts/check.ts',
+    );
+    expect(invalid({ script: ' ' })).toBe('must not be empty');
+    expect(invalid({ script: ['tsx', 'check.ts'] })).toBe('must be text');
+    expect(invalid({ scripts: 'tsx check.ts' })).toMatch(/script/);
   });
 
   it('needs a body', () => {

@@ -353,6 +353,8 @@ export const workflowViewSchema = z.object({
   enabled: z.boolean(),
   /** How many times a run may start in all. */
   maxAttempts: z.int(),
+  /** The command each run runs before its turn; null when none. */
+  script: z.string().nullable(),
   /** When it runs by itself; null when it runs only by hand. */
   schedule: workflowScheduleSchema.nullable(),
   /** Where each run's answer is posted, by ID. */

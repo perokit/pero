@@ -100,7 +100,7 @@ channel: English
 Suggest better English for: {{history}}
 ```
 
-`pero workflows` lists the Workflows and when each runs next, and `pero workflows run english-review` runs one now.
+`pero workflows` lists the Workflows and when each runs next, and `pero workflows run english-review` runs one now. A Workflow with `script: tsx scripts/check.ts` runs that check first and only calls the agent when it prints something other than `NO_DATA` ([script triggers](./docs/USER_GUIDE.md#script-triggers)).
 
 `pero runs` shows what ran and how it went.
 

@@ -50,6 +50,9 @@ export function formatWorkflowDetails(workflow: WorkflowView): string {
       ['note', workflow.file],
       ['channel note', channelNote(workflow)],
       ['input', preview(workflow.inputTemplate)],
+      ...(workflow.script === null
+        ? []
+        : [['script', `${workflow.script} (NO_DATA skips the turn)`]]),
       ...(workflow.schedule === null
         ? [['schedule', 'none: it runs by hand, with pero workflows run']]
         : [
